@@ -80,8 +80,8 @@ print("WormLib dependencies OK")
 ### Interactive Analysis (Jupyter Notebook)
 
 ```bash
-cd notebooks
-jupyter notebook WormLib.ipynb
+cd examples
+jupyter notebook wormlib_example.ipynb
 ```
 
 Configure parameters in the notebook (Section 1.2):
@@ -112,7 +112,7 @@ run_line_scan_analysis = True
 
 ```bash
 # Submit array job for all images in an experiment
-sbatch --array=0-N notebooks/run-WormLib.sh /path/to/experiment
+sbatch --array=0-N examples/run-WormLib.sh /path/to/experiment
 
 # The script automatically:
 # 1. Processes each image subdirectory
@@ -123,14 +123,14 @@ sbatch --array=0-N notebooks/run-WormLib.sh /path/to/experiment
 ### Command-Line Execution
 
 ```bash
-cd notebooks
+cd examples
 
 # Set environment variables (see run-WormLib.sh for full list)
 export FOLDER_NAME="/path/to/input"
 export OUTPUT_DIRECTORY="/path/to/output"
 export DV_IMAGES="True"
 
-python WormLib.py
+python ../src/wormlib.py
 ```
 
 ---
@@ -169,22 +169,23 @@ python WormLib.py
 
 ```text
 WormLib/
-├── notebooks/                    # Analysis scripts
-│   ├── WormLib.py                # Main analysis engine (~2,150 lines)
-│   ├── WormLib.ipynb             # Jupyter notebook version
+├── src/
+│   └── wormlib.py                # Main analysis engine
+├── examples/
+│   ├── wormlib_example.ipynb     # Jupyter notebook example
 │   └── run-WormLib.sh            # SLURM batch script
+├── models/                       # Trained ML classifiers
+│   ├── 2-cell_classification_RFmodel.joblib
+│   ├── 4-cell_classification_RFmodel.joblib
+│   └── ce-embryo                 # Cellpose pretrained embryo model
 ├── data/                         # Sample microscopy images
 │   ├── 04_dv/                    # DeltaVision samples
 │   ├── 05_dv/
 │   ├── 08_dv/
 │   └── 1886_nd2/                 # Nikon ND2 samples
-├── models/                       # Trained ML classifiers
-│   ├── 2-cell_classification_RFmodel.joblib
-│   └── 4-cell_classification_RFmodel.joblib
-├── modeling/                     # Model training & development
 ├── docs/                         # Documentation and assets
 │   └── WormLib_logo.png
-├── src/                          # Future package source
+├── .gitignore
 ├── requirements.txt              # Python dependencies
 └── LICENSE                       # MIT License
 ```

@@ -4,68 +4,40 @@
 # # WormLib: open source image analysis library for *C. elegans* 
 
 # Standard library imports
-import csv
 import os
-import time
 import warnings
-from datetime import datetime
-import pathlib
 from pathlib import Path
+
+__version__ = "1.0.0"
 # Scientific computing
 import numpy as np
 import pandas as pd
-from scipy.ndimage import binary_dilation, label, gaussian_filter, rotate, center_of_mass, zoom
-from scipy.spatial import cKDTree
+from scipy.ndimage import label, center_of_mass
 
 # Image processing
 import cv2
-import tifffile
 import tifffile as tiff
-from PIL import Image
 from skimage import measure, morphology, filters
-from skimage.draw import polygon2mask
-from skimage.measure import label, regionprops, regionprops_table
-from skimage.morphology import square, dilation, erosion, disk, binary_erosion
-from skimage.transform import resize
+from skimage.measure import regionprops_table
+from skimage.morphology import erosion, disk
 from skimage.util import img_as_float
 
 # Machine learning
 import joblib
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.exceptions import InconsistentVersionWarning
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix
 
 # Visualization
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import matplotlib.patches as patches
-from matplotlib.colors import ListedColormap
-#from matplotlib.path import Path
-from matplotlib.path import Path as MPLPath  # Explicit alias for matplotlib
-from mpl_toolkits.mplot3d import Axes3D
-import plotly.graph_objects as go
 import seaborn as sns
 
 # Specialized libraries
-import bigfish
 import bigfish.stack as stack
 import bigfish.plot as plot
 import bigfish.multistack as multistack
 import bigfish.detection as detection
-import cellpose
 from cellpose import models, utils
 import nd2
 
-# PDF generation
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
-from reportlab.pdfgen import canvas
-from reportlab.platypus import Table, TableStyle, SimpleDocTemplate
-
-# Jupyter/IPython
-from IPython.display import Image, display
+# Jupyter/IPython imports removed
 
 # Multiprocessing
 import multiprocessing as mp
