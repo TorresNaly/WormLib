@@ -4,6 +4,7 @@
 # # WormLib: open source image analysis library for *C. elegans* 
 
 # Standard library imports
+import argparse
 import os
 import sys
 import csv
@@ -15,6 +16,7 @@ __version__ = "1.0.0"
 # Scientific computing
 import numpy as np
 import pandas as pd
+import yaml
 from scipy.ndimage import label, center_of_mass, binary_dilation
 
 # Image processing
@@ -88,7 +90,189 @@ def create_cellpose_model(prefer_mps: bool = False):
 
 
 
-def load_images(image_path, output_directory, channel_names, slice_to_plot=0):
+def normalize_optional_channel(value):
+    if value is None:
+        return None
+    value = str(value).strip()
+    if value.lower() in {"", "none", "nothing", "null", "false", "off", "na", "n/a"}:
+        return None
+    return value
+
+
+def parse_optional_int(value, default=None):
+    if value is None:
+        return default
+    value = str(value).strip()
+    if value.lower() in {"", "none", "nothing", "null", "false", "off", "na", "n/a"}:
+        return None
+    return int(value)
+
+
+def parse_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def parse_int_tuple(value, default):
+    if value is None:
+        return tuple(default)
+    if isinstance(value, (list, tuple)):
+        return tuple(int(v) for v in value)
+    return tuple(int(v.strip()) for v in str(value).split(","))
+
+
+def resolve_path(value, base_dir=None):
+    if value is None:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute() and base_dir is not None:
+        path = Path(base_dir) / path
+    return str(path.resolve())
+
+
+def normalize_pipeline_config(raw_config=None, base_dir=None, cli_input=None, cli_output=None):
+    """Normalize YAML or legacy env settings into one semantic pipeline config."""
+    raw_config = raw_config or {}
+    input_config = raw_config.get("input", {})
+    microscope_config = raw_config.get("microscope", {})
+    channel_config = raw_config.get("channels", {})
+    pipeline_config = raw_config.get("pipeline", {})
+    segmentation_config = raw_config.get("segmentation", {})
+
+    input_path = cli_input or input_config.get("path") or raw_config.get("input_path")
+    output_directory = cli_output or input_config.get("output_directory") or raw_config.get("output_directory")
+
+    nuclei_config = channel_config.get("nuclei") or {}
+    brightfield_config = channel_config.get("brightfield") or {}
+    rna_configs = channel_config.get("rna") or []
+    nuclei_name = normalize_optional_channel(nuclei_config.get("name", "DAPI"))
+    brightfield_name = normalize_optional_channel(brightfield_config.get("name", "brightfield"))
+
+    normalized_rna = []
+    for i, rna in enumerate(rna_configs):
+        if not rna:
+            continue
+        name = normalize_optional_channel(rna.get("name") or rna.get("label") or f"RNA{i + 1}")
+        if name is None:
+            continue
+        normalized_rna.append({
+            "name": name,
+            "fluorophore": normalize_optional_channel(rna.get("fluorophore")),
+            "index": parse_optional_int(rna.get("index"), i),
+            "spot_radius": parse_int_tuple(
+                rna.get("spot_radius_nm") or rna.get("spot_radius"),
+                microscope_config.get("default_spot_radius_nm", [1409, 340, 340]),
+            ),
+            "detection_color": rna.get("detection_color", ["red", "blue", "green", "magenta"][i % 4]),
+            "colormap": rna.get("colormap", "PiYG"),
+        })
+
+    return {
+        "input_path": resolve_path(input_path, base_dir),
+        "output_directory": resolve_path(output_directory, base_dir),
+        "voxel_size": parse_int_tuple(microscope_config.get("voxel_size_nm"), [1448, 450, 450]),
+        "channels": {
+            "nuclei": {
+                "name": nuclei_name,
+                "index": None if nuclei_name is None else parse_optional_int(nuclei_config.get("index"), 3),
+            },
+            "brightfield": {
+                "name": brightfield_name,
+                "index": None if brightfield_name is None else parse_optional_int(brightfield_config.get("index"), None),
+                "source": brightfield_config.get("source", "auto"),
+            },
+            "rna": normalized_rna,
+        },
+        "segmentation": {
+            "embryo_diameter": int(segmentation_config.get("embryo_diameter", 500)),
+            "nuclei_diameter": int(segmentation_config.get("nuclei_diameter", 70)),
+            "cell_diameter": int(segmentation_config.get("cell_diameter", 250)),
+        },
+        "pipeline": {
+            "cell_segmentation": parse_bool(pipeline_config.get("cell_segmentation"), True),
+            "cell_classification": parse_bool(pipeline_config.get("cell_classification"), True),
+            "embryo_segmentation": parse_bool(pipeline_config.get("embryo_segmentation"), True),
+            "spot_detection": parse_bool(pipeline_config.get("spot_detection"), True),
+            "heatmaps": parse_bool(pipeline_config.get("heatmaps"), True),
+            "rna_density": parse_bool(pipeline_config.get("rna_density"), True),
+            "line_scan": parse_bool(pipeline_config.get("line_scan"), True),
+        },
+    }
+
+
+def config_from_legacy_env(cli_input=None, cli_output=None):
+    """Translate the historical environment-variable API into semantic config."""
+    rna_channels = []
+    cy5 = normalize_optional_channel(os.getenv('Cy5', 'mRNA1'))
+    mcherry = normalize_optional_channel(os.getenv('mCherry', 'mRNA2'))
+    if cy5 is not None:
+        rna_channels.append({
+            "name": cy5,
+            "fluorophore": "Cy5",
+            "index": parse_optional_int(os.getenv('CY5_INDEX'), 0),
+            "spot_radius_nm": parse_int_tuple(os.getenv('SPOT_RADIUS_CH0'), [1409, 340, 340]),
+            "detection_color": "red",
+        })
+    if mcherry is not None:
+        rna_channels.append({
+            "name": mcherry,
+            "fluorophore": "mCherry",
+            "index": parse_optional_int(os.getenv('MCHERRY_INDEX'), 1),
+            "spot_radius_nm": parse_int_tuple(os.getenv('SPOT_RADIUS_CH1'), [1283, 310, 310]),
+            "detection_color": "blue",
+        })
+
+    raw_config = {
+        "input": {
+            "path": cli_input or os.getenv('FOLDER_NAME'),
+            "output_directory": cli_output or os.getenv('OUTPUT_DIRECTORY'),
+        },
+        "microscope": {
+            "voxel_size_nm": parse_int_tuple(os.getenv('VOXEL_SIZE'), [1448, 450, 450]),
+        },
+        "channels": {
+            "rna": rna_channels,
+            "nuclei": {
+                "name": normalize_optional_channel(os.getenv('DAPI', 'DAPI')),
+                "index": parse_optional_int(os.getenv('DAPI_INDEX'), 3),
+            },
+            "brightfield": {
+                "name": normalize_optional_channel(os.getenv('brightfield', 'brightfield')),
+                "index": parse_optional_int(os.getenv('BRIGHTFIELD_INDEX'), None),
+            },
+        },
+        "segmentation": {
+            "embryo_diameter": int(os.getenv('EMBRYO_DIAMETER', '500')),
+            "nuclei_diameter": int(os.getenv('NUCLEI_DIAMETER', '70')),
+            "cell_diameter": int(os.getenv('CELL_DIAMETER', '250')),
+        },
+        "pipeline": {
+            "cell_segmentation": parse_bool(os.getenv('RUN_CELL_SEGMENTATION'), True),
+            "cell_classification": parse_bool(os.getenv('RUN_CELL_CLASSIFIER'), True),
+            "embryo_segmentation": parse_bool(os.getenv('RUN_EMBRYO_SEGMENTATION'), True),
+            "spot_detection": parse_bool(os.getenv('RUN_SPOT_DETECTION') or os.getenv('SPOT_DETECTION'), True),
+            "heatmaps": parse_bool(os.getenv('RUN_mRNA_HEATMAPS'), True),
+            "rna_density": parse_bool(os.getenv('RUN_RNA_DENSITY_ANALYSIS'), True),
+            "line_scan": parse_bool(os.getenv('RUN_LINE_SCAN_ANALYSIS'), True),
+        },
+    }
+    return normalize_pipeline_config(raw_config)
+
+
+def load_pipeline_config(config_path=None, cli_input=None, cli_output=None):
+    if config_path is None:
+        return config_from_legacy_env(cli_input=cli_input, cli_output=cli_output)
+
+    config_path = Path(config_path).expanduser().resolve()
+    with open(config_path, "r") as handle:
+        raw_config = yaml.safe_load(handle) or {}
+    return normalize_pipeline_config(raw_config, base_dir=config_path.parent, cli_input=cli_input, cli_output=cli_output)
+
+
+def load_images(image_path, output_directory, channel_names, slice_to_plot=0, channel_indices=None):
     """
     Automatically detect image type (DV, ND2, or TIFF) and load images accordingly.
     """
@@ -115,11 +299,15 @@ def load_images(image_path, output_directory, channel_names, slice_to_plot=0):
         return None
     
     # Extract channel names (use .get() to avoid KeyError)
-    Cy5 = channel_names.get('Cy5', None)
-    mCherry = channel_names.get('mCherry', None)
-    FITC = channel_names.get('FITC', None)
-    DAPI = channel_names.get('DAPI', None)
-    brightfield = channel_names.get('brightfield', None)
+    Cy5 = normalize_optional_channel(channel_names.get('Cy5', None))
+    mCherry = normalize_optional_channel(channel_names.get('mCherry', None))
+    FITC = normalize_optional_channel(channel_names.get('FITC', None))
+    DAPI = normalize_optional_channel(channel_names.get('DAPI', None))
+    brightfield = normalize_optional_channel(channel_names.get('brightfield', None))
+    channel_indices = channel_indices or {}
+
+    def _channel_index(name, default):
+        return parse_optional_int(channel_indices.get(name), default)
     
     # Detect image type
     dv_files = [f for f in list_filenames if f.endswith('.dv')]
@@ -188,21 +376,30 @@ def load_images(image_path, output_directory, channel_names, slice_to_plot=0):
                 # 4D stack [C, Z, Y, X] - assign color channels ONLY if requested
                 image_colors = image_stack
                 
-                if Cy5 is not None and image_colors.shape[0] > 0:
-                    Cy5_array = image_colors[0, :, :, :]
+                cy5_index = _channel_index('Cy5', 0)
+                if Cy5 is not None and cy5_index is not None and image_colors.shape[0] > cy5_index:
+                    Cy5_array = image_colors[cy5_index, :, :, :]
                     image_Cy5 = np.max(Cy5_array, axis=0)
                 
-                if mCherry is not None and image_colors.shape[0] > 1:
-                    mCherry_array = image_colors[1, :, :, :]
+                mcherry_index = _channel_index('mCherry', 1)
+                if mCherry is not None and mcherry_index is not None and image_colors.shape[0] > mcherry_index:
+                    mCherry_array = image_colors[mcherry_index, :, :, :]
                     image_mCherry = np.max(mCherry_array, axis=0)
                 
-                if FITC is not None and image_colors.shape[0] > 2:
-                    FITC_array = image_colors[2, :, :, :]
+                fitc_index = _channel_index('FITC', 2)
+                if FITC is not None and fitc_index is not None and image_colors.shape[0] > fitc_index:
+                    FITC_array = image_colors[fitc_index, :, :, :]
                     image_FITC = np.max(FITC_array, axis=0)
                 
-                if DAPI is not None and image_colors.shape[0] > 3:
-                    nuclei_array = image_colors[3, :, :, :]
+                dapi_index = _channel_index('DAPI', 3)
+                if DAPI is not None and dapi_index is not None and image_colors.shape[0] > dapi_index:
+                    nuclei_array = image_colors[dapi_index, :, :, :]
                     image_nuclei = np.max(nuclei_array, axis=0)
+
+                brightfield_index = _channel_index('brightfield', None)
+                if brightfield is not None and brightfield_index is not None and image_colors.shape[0] > brightfield_index:
+                    bf_stack = image_colors[brightfield_index, :, :, :]
+                    bf = np.max(bf_stack, axis=0)
                 
                 print("Loaded 4D color channel stack")
         
@@ -224,24 +421,29 @@ def load_images(image_path, output_directory, channel_names, slice_to_plot=0):
         print(f"Image colors shape: {image_colors.shape}\n")
         
         # Assign channels [T, C, Y, X]
-        if Cy5 is not None and image_colors.shape[1] > 0:
-            Cy5_array = image_colors[:, 0, :, :]
+        cy5_index = _channel_index('Cy5', 0)
+        if Cy5 is not None and cy5_index is not None and image_colors.shape[1] > cy5_index:
+            Cy5_array = image_colors[:, cy5_index, :, :]
             image_Cy5 = np.max(Cy5_array, axis=0)
         
-        if mCherry is not None and image_colors.shape[1] > 1:
-            mCherry_array = image_colors[:, 1, :, :]
+        mcherry_index = _channel_index('mCherry', 1)
+        if mCherry is not None and mcherry_index is not None and image_colors.shape[1] > mcherry_index:
+            mCherry_array = image_colors[:, mcherry_index, :, :]
             image_mCherry = np.max(mCherry_array, axis=0)
         
-        if FITC is not None and image_colors.shape[1] > 2:
-            FITC_array = image_colors[:, 2, :, :]
+        fitc_index = _channel_index('FITC', 2)
+        if FITC is not None and fitc_index is not None and image_colors.shape[1] > fitc_index:
+            FITC_array = image_colors[:, fitc_index, :, :]
             image_FITC = np.max(FITC_array, axis=0)
         
-        if DAPI is not None and image_colors.shape[1] > 3:
-            nuclei_array = image_colors[:, 3, :, :]
+        dapi_index = _channel_index('DAPI', 3)
+        if DAPI is not None and dapi_index is not None and image_colors.shape[1] > dapi_index:
+            nuclei_array = image_colors[:, dapi_index, :, :]
             image_nuclei = np.max(nuclei_array, axis=0)
         
-        if brightfield is not None and image_colors.shape[1] > 4:
-            bf_stack = image_colors[:, 4, :, :]
+        brightfield_index = _channel_index('brightfield', 4)
+        if brightfield is not None and brightfield_index is not None and image_colors.shape[1] > brightfield_index:
+            bf_stack = image_colors[:, brightfield_index, :, :]
             bf = np.max(bf_stack, axis=0)
         
         grid_width, grid_height = 80, 60
@@ -308,6 +510,206 @@ def load_images(image_path, output_directory, channel_names, slice_to_plot=0):
         'nuclei_array': nuclei_array,
         'grid_width': grid_width,
         'grid_height': grid_height
+    }
+
+
+def _image_files_for_path(image_path):
+    image_path = Path(image_path)
+    if image_path.is_file():
+        folder_path = image_path.parent
+        filenames = [image_path.name]
+    elif image_path.is_dir():
+        folder_path = image_path
+        filenames = sorted([
+            f for f in os.listdir(folder_path)
+            if not f.startswith('.') and not f.startswith('_')
+        ])
+    else:
+        print(f"Path does not exist: {image_path}")
+        return None, None, []
+
+    dv_files = [f for f in filenames if f.endswith('.dv')]
+    nd2_files = [f for f in filenames if f.endswith('.nd2')]
+    tiff_files = [f for f in filenames if f.endswith(('.tif', '.tiff'))]
+
+    if dv_files:
+        return "dv", folder_path, dv_files
+    if nd2_files:
+        return "nd2", folder_path, nd2_files
+    if tiff_files:
+        return "tiff", folder_path, tiff_files
+    return None, folder_path, []
+
+
+def _image_name_from_file(filename, image_type):
+    if image_type == "dv":
+        if '_R3D_REF.dv' in filename:
+            return filename.replace("_R3D_REF.dv", "")
+        if '_R3D.dv' in filename:
+            return filename.replace("_R3D.dv", "")
+        return filename.replace(".dv", "")
+    if image_type == "nd2":
+        return filename.replace(".nd2", "")
+    return filename.replace(".tif", "").replace(".tiff", "")
+
+
+def _project_channel(stack_data, channel_index, channel_axis):
+    if channel_index is None:
+        return None, None
+    if stack_data.ndim <= channel_axis or stack_data.shape[channel_axis] <= channel_index:
+        return None, None
+    channel_stack = np.take(stack_data, channel_index, axis=channel_axis)
+    channel_image = np.max(channel_stack, axis=0) if channel_stack.ndim == 3 else channel_stack
+    return channel_stack, channel_image
+
+
+def load_images_semantic(config, slice_to_plot=0):
+    """Load images using semantic channel roles from a normalized config."""
+    output_directory = config["output_directory"]
+    image_type, folder_path, image_files = _image_files_for_path(config["input_path"])
+    if not image_type:
+        print("No supported image format found (.dv, .nd2, .tif, .tiff)")
+        return None
+
+    print(f"Detected {image_type.upper()} images")
+    image_name = _image_name_from_file(image_files[0], image_type)
+    print(f"Image ID: {image_name}\n")
+
+    nuclei_config = config["channels"]["nuclei"]
+    brightfield_config = config["channels"]["brightfield"]
+    rna_configs = config["channels"]["rna"]
+
+    bf = None
+    image_nuclei = None
+    nuclei_array = None
+    loaded_rna = [
+        {
+            **rna,
+            "array": None,
+            "image": None,
+            "spots": None,
+            "clusters": None,
+            "counts": None,
+        }
+        for rna in rna_configs
+    ]
+    image_FITC = None
+    FITC_array = None
+    grid_width, grid_height = (80, 60) if image_type == "nd2" else (80, 80)
+
+    if image_type == "dv":
+        for filename in image_files:
+            image_stack = stack.read_dv(os.path.join(folder_path, filename)).astype(np.uint16)
+            print(f'Processing file {filename} with shape: {image_stack.shape}')
+
+            if image_stack.ndim == 2:
+                if brightfield_config["name"] is not None:
+                    bf = image_stack
+                    print("Loaded 2D brightfield/reference image")
+                continue
+
+            if image_stack.ndim == 4:
+                for rna in loaded_rna:
+                    rna_array, rna_image = _project_channel(image_stack, rna["index"], channel_axis=0)
+                    if rna_array is not None:
+                        rna["array"] = rna_array
+                        rna["image"] = rna_image
+
+                if nuclei_config["name"] is not None:
+                    nuclei_array, image_nuclei = _project_channel(image_stack, nuclei_config["index"], channel_axis=0)
+
+                if brightfield_config["name"] is not None and brightfield_config["index"] is not None:
+                    _, bf = _project_channel(image_stack, brightfield_config["index"], channel_axis=0)
+
+                print("Loaded 4D channel stack")
+
+    elif image_type == "nd2":
+        image_stack = nd2.imread(os.path.join(folder_path, image_files[0]))
+        print(f"Image colors shape: {image_stack.shape}\n")
+
+        for rna in loaded_rna:
+            rna_array, rna_image = _project_channel(image_stack, rna["index"], channel_axis=1)
+            if rna_array is not None:
+                rna["array"] = rna_array
+                rna["image"] = rna_image
+
+        if nuclei_config["name"] is not None:
+            nuclei_array, image_nuclei = _project_channel(image_stack, nuclei_config["index"], channel_axis=1)
+
+        if brightfield_config["name"] is not None:
+            _, bf = _project_channel(image_stack, brightfield_config["index"], channel_axis=1)
+
+    else:
+        image_stack = tiff.imread(os.path.join(folder_path, image_files[0]))
+        print(f"Image shape: {image_stack.shape}")
+        if image_stack.ndim == 4:
+            for rna in loaded_rna:
+                rna_array, rna_image = _project_channel(image_stack, rna["index"], channel_axis=0)
+                if rna_array is not None:
+                    rna["array"] = rna_array
+                    rna["image"] = rna_image
+            if nuclei_config["name"] is not None:
+                nuclei_array, image_nuclei = _project_channel(image_stack, nuclei_config["index"], channel_axis=0)
+            if brightfield_config["name"] is not None:
+                _, bf = _project_channel(image_stack, brightfield_config["index"], channel_axis=0)
+        elif image_stack.ndim == 3 and loaded_rna:
+            loaded_rna[0]["array"] = image_stack
+            loaded_rna[0]["image"] = np.max(image_stack, axis=0)
+        elif image_stack.ndim == 2 and brightfield_config["name"] is not None:
+            bf = image_stack
+
+        plt.figure(figsize=(4, 4))
+        if image_stack.ndim == 3:
+            total_z = image_stack.shape[0]
+            if slice_to_plot >= total_z:
+                slice_to_plot = 0
+            plt.imshow(image_stack[slice_to_plot], cmap='gray')
+            plt.title(f"Slice {slice_to_plot} of {total_z}")
+        elif image_stack.ndim == 2:
+            plt.imshow(image_stack, cmap='gray')
+            plt.title("2D Image")
+        plt.axis('off')
+        plt.show()
+
+    loaded_rna = [rna for rna in loaded_rna if rna["array"] is not None and rna["image"] is not None]
+
+    overview_images = [(rna["image"], rna["name"]) for rna in loaded_rna]
+    if image_nuclei is not None and nuclei_config["name"] is not None:
+        overview_images.append((image_nuclei, nuclei_config["name"]))
+    if bf is not None and brightfield_config["name"] is not None:
+        overview_images.append((bf, brightfield_config["name"]))
+    if overview_images:
+        fig, ax = plt.subplots(1, len(overview_images), figsize=(4 * len(overview_images), 4))
+        if len(overview_images) == 1:
+            ax = [ax]
+        for i, (img, title) in enumerate(overview_images):
+            ax[i].imshow(img, cmap="gray")
+            ax[i].set_title(title, size=20)
+            ax[i].axis("off")
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_directory, f'channels_{image_name}.png'))
+        plt.show()
+        plt.close()
+
+    missing_rna = [rna["name"] for rna in rna_configs if rna["name"] not in {loaded["name"] for loaded in loaded_rna}]
+    for name in missing_rna:
+        print(f"⚠️ RNA channel '{name}' was configured but not loaded. Check its channel index.")
+    if nuclei_config["name"] is not None and image_nuclei is None:
+        print(f"⚠️ Nuclei channel '{nuclei_config['name']}' was configured but not loaded.")
+    if brightfield_config["name"] is not None and bf is None:
+        print(f"⚠️ Brightfield/reference channel '{brightfield_config['name']}' was configured but not loaded.")
+
+    return {
+        "image_type": image_type,
+        "image_name": image_name,
+        "bf": bf,
+        "image_nuclei": image_nuclei,
+        "nuclei_array": nuclei_array,
+        "rna_channels": loaded_rna,
+        "image_FITC": image_FITC,
+        "FITC_array": FITC_array,
+        "grid_width": grid_width,
+        "grid_height": grid_height,
     }
 
 
@@ -2196,16 +2598,18 @@ if __name__ == "__main__":
 
     print("Running WormLib CLI pipeline...")
 
-    # 1. Parse FOLDER_NAME and OUTPUT_DIRECTORY (command-line arguments or environment variables)
-    if len(sys.argv) >= 3:
-        folder_name = sys.argv[1]
-        output_directory_path = sys.argv[2]
-    else:
-        folder_name = os.getenv('FOLDER_NAME')
-        output_directory_path = os.getenv('OUTPUT_DIRECTORY')
+    parser = argparse.ArgumentParser(description="Run the WormLib image-analysis pipeline.")
+    parser.add_argument("input_path", nargs="?", help="Input image file or folder. Overrides config input.path.")
+    parser.add_argument("output_directory", nargs="?", help="Output directory. Overrides config input.output_directory.")
+    parser.add_argument("-c", "--config", help="YAML config file with semantic channel roles.")
+    args = parser.parse_args()
+
+    config = load_pipeline_config(args.config, cli_input=args.input_path, cli_output=args.output_directory)
+    folder_name = config["input_path"]
+    output_directory_path = config["output_directory"]
 
     if not folder_name or not output_directory_path:
-        print("ERROR: Both 'FOLDER_NAME' and 'OUTPUT_DIRECTORY' must be specified via arguments or environment variables.")
+        print("ERROR: Provide input and output paths either as arguments, in --config, or via FOLDER_NAME/OUTPUT_DIRECTORY.")
         sys.exit(1)
 
     output_directory = Path(output_directory_path)
@@ -2214,43 +2618,25 @@ if __name__ == "__main__":
     print(f"Input Directory: {folder_name}")
     print(f"Output Directory: {output_directory}")
 
-    # 2. Parse microscope and channel parameters from environment
-    voxel_size = tuple(map(int, os.getenv('VOXEL_SIZE', '1448,450,450').split(',')))
-    spot_radius_ch0 = tuple(map(int, os.getenv('SPOT_RADIUS_CH0', '1409,340,340').split(',')))
-    spot_radius_ch1 = tuple(map(int, os.getenv('SPOT_RADIUS_CH1', '1283,310,310').split(',')))
-
-    Cy5 = os.getenv('Cy5', 'mRNA1')
-    mCherry = os.getenv('mCherry', 'mRNA2')
-    FITC = os.getenv('FITC', 'nothing')
-    DAPI = os.getenv('DAPI', 'DAPI')
-    brightfield = os.getenv('brightfield', 'brightfield')
-
-    if FITC == 'nothing':
-        FITC = None
-
-    channel_names = {
-        'Cy5': Cy5,
-        'mCherry': mCherry,
-        'FITC': FITC,
-        'DAPI': DAPI,
-        'brightfield': brightfield
-    }
-
-    # Pipeline flags
-    run_embryo_segmentation = os.getenv('RUN_EMBRYO_SEGMENTATION', 'True') == 'True'
-    embryo_diameter = int(os.getenv('EMBRYO_DIAMETER', '500'))
-    nuclei_diameter = int(os.getenv('NUCLEI_DIAMETER', '70'))
-    run_cell_segmentation = os.getenv('RUN_CELL_SEGMENTATION', 'True') == 'True'
-    cell_diameter = int(os.getenv('CELL_DIAMETER', '250'))
-    run_cell_classifier = os.getenv('RUN_CELL_CLASSIFIER', 'True') == 'True'
-    run_spot_detection = (os.getenv('RUN_SPOT_DETECTION') or os.getenv('SPOT_DETECTION') or 'True') == 'True'
-    run_mRNA_heatmaps = os.getenv('RUN_mRNA_HEATMAPS', 'True') == 'True'
-    run_rna_density_analysis = os.getenv('RUN_RNA_DENSITY_ANALYSIS', 'True') == 'True'
-    run_line_scan_analysis = os.getenv('RUN_LINE_SCAN_ANALYSIS', 'True') == 'True'
+    voxel_size = config["voxel_size"]
+    embryo_diameter = config["segmentation"]["embryo_diameter"]
+    nuclei_diameter = config["segmentation"]["nuclei_diameter"]
+    cell_diameter = config["segmentation"]["cell_diameter"]
+    run_embryo_segmentation = config["pipeline"]["embryo_segmentation"]
+    run_cell_segmentation = config["pipeline"]["cell_segmentation"]
+    run_cell_classifier = config["pipeline"]["cell_classification"]
+    run_spot_detection = config["pipeline"]["spot_detection"]
+    run_mRNA_heatmaps = config["pipeline"]["heatmaps"]
+    run_rna_density_analysis = config["pipeline"]["rna_density"]
+    run_line_scan_analysis = config["pipeline"]["line_scan"]
 
     # Print parsed settings
-    print(f"\nMicroscope Settings:\n  Voxel Size: {voxel_size}\n  Spot Radius Ch0: {spot_radius_ch0}\n  Spot Radius Ch1: {spot_radius_ch1}")
-    print(f"\nChannel Assignments:\n  Cy5: {Cy5}\n  mCherry: {mCherry}\n  FITC: {FITC}\n  DAPI: {DAPI}\n  brightfield: {brightfield}")
+    print(f"\nMicroscope Settings:\n  Voxel Size: {voxel_size}")
+    print("\nChannel Roles:")
+    print(f"  nuclei: {config['channels']['nuclei']['name']} (index {config['channels']['nuclei']['index']})")
+    print(f"  brightfield/reference: {config['channels']['brightfield']['name']} (index {config['channels']['brightfield']['index']})")
+    for rna in config["channels"]["rna"]:
+        print(f"  RNA: {rna['name']} (index {rna['index']}, spot radius {rna['spot_radius']})")
 
     # Determine model paths relative to src directory
     src_dir = Path(__file__).resolve().parent
@@ -2258,8 +2644,8 @@ if __name__ == "__main__":
     model_2cell_path = main_dir / "models/2-cell_classification_RFmodel.joblib"
     model_4cell_path = main_dir / "models/4-cell_classification_RFmodel.joblib"
 
-    # 3. Load Images using the unified loader
-    loaded_result = load_images(folder_name, output_directory, channel_names, slice_to_plot=0)
+    # 3. Load Images using semantic channel roles
+    loaded_result = load_images_semantic(config, slice_to_plot=0)
     if loaded_result is None:
         print("ERROR: Image loading failed. Exiting.")
         sys.exit(1)
@@ -2267,18 +2653,27 @@ if __name__ == "__main__":
     image_type = loaded_result['image_type']
     image_name = loaded_result['image_name']
     bf = loaded_result['bf']
-    image_Cy5 = loaded_result['image_Cy5']
-    image_mCherry = loaded_result['image_mCherry']
     image_FITC = loaded_result['image_FITC']
     image_nuclei = loaded_result['image_nuclei']
-    Cy5_array = loaded_result['Cy5_array']
-    mCherry_array = loaded_result['mCherry_array']
     FITC_array = loaded_result['FITC_array']
     nuclei_array = loaded_result['nuclei_array']
+    rna_channels = loaded_result['rna_channels']
     grid_width = loaded_result['grid_width']
     grid_height = loaded_result['grid_height']
 
     print(f"\nSuccessfully loaded image: {image_name} (Format: {image_type.upper()})")
+
+    def first_analysis_shape():
+        for rna in rna_channels:
+            if rna["array"] is not None:
+                return rna["array"].shape[-2:]
+        for array in (FITC_array, nuclei_array):
+            if array is not None:
+                return array.shape[-2:]
+        for image in (image_FITC, image_nuclei, bf):
+            if image is not None:
+                return image.shape[-2:]
+        return None
 
     # 4. Cell Segmentation & Classification
     masks_cytosol, masks_nuclei = None, None
@@ -2326,6 +2721,26 @@ if __name__ == "__main__":
             cell_stage = "no-nuclei"
             fallback_to_embryo = True
             masks_cytosol = None
+    elif run_cell_segmentation and bf is None and image_nuclei is not None:
+        print("\nRunning nuclear-only segmentation because no brightfield/reference image was loaded.")
+        masks_nuclei = nuclear_segmentation(image_nuclei)
+        masks_cytosol = masks_nuclei
+        cell_stage = "nuclei-only"
+        run_cell_classifier = False
+
+        tiff.imwrite(os.path.join(output_directory, "masks_nuclei.tif"), masks_nuclei.astype(masks_nuclei.dtype))
+        tiff.imwrite(os.path.join(output_directory, "masks_cytosol.tif"), masks_cytosol.astype(masks_cytosol.dtype))
+
+        fig, ax = plt.subplots(1, 2, figsize=(8, 4))
+        ax[0].imshow(image_nuclei, cmap="gray")
+        ax[0].set_title("DAPI")
+        ax[0].axis("off")
+        ax[1].imshow(masks_nuclei, cmap="viridis")
+        ax[1].set_title("Nuclear masks")
+        ax[1].axis("off")
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_directory, f'nuclear_segmentation_{image_name}.png'), bbox_inches='tight')
+        plt.close()
 
     # Fallback to embryo segmentation if cell stage couldn't be determined or cell segmentation was skipped
     if cell_stage == "no-nuclei" or masks_cytosol is None or fallback_to_embryo:
@@ -2341,73 +2756,68 @@ if __name__ == "__main__":
                 masks_cytosol = None
             print("Skipping segmentation.")
 
-    # 5. Spot Detection
-    list_spots_in_each_cell_ch0, list_spots_in_each_cell_ch1 = None, None
-    spots_post_clustering_ch0, spots_post_clustering_ch1 = None, None
+    if run_spot_detection and masks_cytosol is None:
+        analysis_shape = first_analysis_shape()
+        if analysis_shape is not None:
+            print("\nNo segmentation mask available; using a whole-image mask for spot detection.")
+            masks_cytosol = np.ones(analysis_shape, dtype=np.uint16)
+            run_cell_classifier = False
+            features_df = None
 
+    # 5. Spot Detection
     if run_spot_detection and masks_cytosol is not None:
         print("\nRunning smFISH spot detection...")
-        if Cy5 is not None and image_Cy5 is not None and Cy5_array is not None:
-            print(f"Detecting {Cy5} molecules...")
-            rna_channel = Cy5
-            detection_color = "red"
-            spots_post_clustering_ch0, clusters_ch0, list_spots_in_each_cell_ch0, _ = spot_detection(
-                Cy5_array, voxel_size, spot_radius_ch0, masks_cytosol,
-                image_name=image_name, rna_channel=rna_channel,
-                detection_color=detection_color, output_directory=output_directory)
-
-        if mCherry is not None and image_mCherry is not None and mCherry_array is not None:
-            print(f"Detecting {mCherry} molecules...")
-            rna_channel = mCherry
-            detection_color = "blue"
-            spots_post_clustering_ch1, clusters_ch1, list_spots_in_each_cell_ch1, _ = spot_detection(
-                mCherry_array, voxel_size, spot_radius_ch1, masks_cytosol,
-                image_name=image_name, rna_channel=rna_channel,
-                detection_color=detection_color, output_directory=output_directory)
+        for rna in rna_channels:
+            print(f"Detecting {rna['name']} molecules...")
+            spots, clusters, counts, cluster_counts = spot_detection(
+                rna["array"], voxel_size, rna["spot_radius"], masks_cytosol,
+                image_name=image_name, rna_channel=rna["name"],
+                detection_color=rna["detection_color"], output_directory=output_directory)
+            rna["spots"] = spots
+            rna["clusters"] = clusters
+            rna["counts"] = counts
+            rna["cluster_counts"] = cluster_counts
 
         # 6. Save Spot Abundance Tables (CSVs)
-        sum_spots_ch0 = sum(list_spots_in_each_cell_ch0) if list_spots_in_each_cell_ch0 is not None else None
-        sum_spots_ch1 = sum(list_spots_in_each_cell_ch1) if list_spots_in_each_cell_ch1 is not None else None
-
-        if sum_spots_ch0 is not None or sum_spots_ch1 is not None:
+        detected_rnas = [rna for rna in rna_channels if rna.get("counts") is not None]
+        if detected_rnas:
             # Wide format: total abundance
-            data_wide = {
-                'Image ID': image_name,
-                f'{Cy5} total molecules': sum_spots_ch0,
-                f'{mCherry} total molecules': sum_spots_ch1,
-            }
+            data_wide = {'Image ID': image_name}
+            for rna in detected_rnas:
+                data_wide[f"{rna['name']} total molecules"] = sum(rna["counts"])
             df_quantification = pd.DataFrame([data_wide])
             quantification_output = os.path.join(output_directory, f'total_mRNA_counts_{image_name}.csv')
             df_quantification.to_csv(quantification_output, index=False)
             print(f"Total abundance CSV saved at {quantification_output}")
 
-            # Long format per-cell quantification
-            if run_cell_classifier and features_df is not None:
-                num_cells = max(
-                    len(list_spots_in_each_cell_ch0) if list_spots_in_each_cell_ch0 is not None else 0,
-                    len(list_spots_in_each_cell_ch1) if list_spots_in_each_cell_ch1 is not None else 0
-                )
+            num_regions = max(len(rna["counts"]) for rna in detected_rnas)
+
+            if num_regions > 0:
                 rows_long = []
-                for i in range(num_cells):
-                    label_type = features_df.at[i, "highest_confidence_label"]
-                    confidence = features_df.at[i, "prediction_confidence"]
-                    row = {
-                        'Image ID': image_name,
-                        f'{Cy5}': list_spots_in_each_cell_ch0[i] if list_spots_in_each_cell_ch0 is not None and i < len(list_spots_in_each_cell_ch0) else 0,
-                        f'{mCherry}': list_spots_in_each_cell_ch1[i] if list_spots_in_each_cell_ch1 is not None and i < len(list_spots_in_each_cell_ch1) else 0,
-                        'label': label_type,
-                        'confidence': round(confidence, 3)
-                    }
+                for i in range(num_regions):
+                    row = {'Image ID': image_name, 'region_id': i + 1}
+                    for rna in detected_rnas:
+                        row[rna["name"]] = rna["counts"][i] if i < len(rna["counts"]) else 0
+
+                    if run_cell_classifier and features_df is not None:
+                        row['label'] = features_df.at[i, "highest_confidence_label"]
+                        row['confidence'] = round(features_df.at[i, "prediction_confidence"], 3)
+
                     rows_long.append(row)
-                
+
                 df_long = pd.DataFrame(rows_long)
-                
-                # Write both file formats to guarantee compatibility with all external scripts
-                long_output_path1 = os.path.join(output_directory, f'per_cell_mRNA_counts_{image_name}.csv')
-                long_output_path2 = os.path.join(output_directory, f'quantification_cell_{image_name}.csv')
-                df_long.to_csv(long_output_path1, index=False)
-                df_long.to_csv(long_output_path2, index=False)
-                print(f"Per-cell abundance CSVs saved at {long_output_path1} and {long_output_path2}")
+
+                if run_cell_classifier and features_df is not None:
+                    # Write both file formats to guarantee compatibility with all external scripts
+                    long_output_path1 = os.path.join(output_directory, f'per_cell_mRNA_counts_{image_name}.csv')
+                    long_output_path2 = os.path.join(output_directory, f'quantification_cell_{image_name}.csv')
+                    df_long.to_csv(long_output_path1, index=False)
+                    df_long.to_csv(long_output_path2, index=False)
+                    print(f"Per-cell abundance CSVs saved at {long_output_path1} and {long_output_path2}")
+                else:
+                    region_output_path = os.path.join(output_directory, f'per_region_mRNA_counts_{image_name}.csv')
+                    df_long.to_csv(region_output_path, index=False)
+                    print(f"Per-region abundance CSV saved at {region_output_path}")
 
     # 7. Spatial Analysis of mRNA
     if masks_cytosol is not None:
@@ -2445,29 +2855,23 @@ if __name__ == "__main__":
                 plt.savefig(heatmap_path, dpi=300, bbox_inches='tight')
                 plt.close()
 
-            if image_Cy5 is not None:
-                create_local_heatmap(spots_post_clustering_ch0, image_Cy5, "Cy5 Heatmap", Cy5)
-            if image_mCherry is not None:
-                create_local_heatmap(spots_post_clustering_ch1, image_mCherry, "mCherry Heatmap", mCherry)
+            for rna in rna_channels:
+                if rna.get("image") is not None:
+                    create_local_heatmap(rna.get("spots"), rna["image"], f"{rna['name']} Heatmap", rna["name"])
 
         if run_rna_density_analysis:
             print("\nGenerating RNA density profiles along AP axis...")
-            if image_Cy5 is not None:
-                analyze_rna_density(image_Cy5, masks_cytosol, 'PiYG', Cy5, image_name, output_directory)
-            if image_mCherry is not None:
-                analyze_rna_density(image_mCherry, masks_cytosol, 'PiYG', mCherry, image_name, output_directory)
+            for rna in rna_channels:
+                if rna.get("image") is not None:
+                    analyze_rna_density(rna["image"], masks_cytosol, rna["colormap"], rna["name"], image_name, output_directory)
 
         if run_line_scan_analysis:
             print("\nGenerating Line Scan intensity profiles...")
-            rna_names = [Cy5, mCherry]
-            rna_images = [image_Cy5, image_mCherry]
-            colormap_list = ['PiYG', 'PiYG']
-            
-            for m_name, img, cmap in zip(rna_names, rna_images, colormap_list):
-                if img is not None:
+            for rna in rna_channels:
+                if rna.get("image") is not None:
                     # Retrieve df_long from locals safely if it exists
                     l_df = locals().get('df_long', None)
-                    line_scan(img, masks_cytosol, cmap, m_name, image_name, output_directory,
+                    line_scan(rna["image"], masks_cytosol, rna["colormap"], rna["name"], image_name, output_directory,
                               run_cell_classifier=run_cell_classifier, features_df=features_df, df_long=l_df)
 
     # 8. Export PDF Report

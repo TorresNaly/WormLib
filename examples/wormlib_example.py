@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import tifffile as tiff
 
 # Reporting and Utils
 import csv
@@ -42,8 +43,9 @@ main_dir = Path(src_dir.parent)
 
 from wormlib import (
     load_images, segmentation, get_cell_stage_and_size_filtered,
-    classify_2cell, classify_4cell, embryo_segmentation,
+    classify_2cell, classify_4cell, embryo_segmentation, nuclear_segmentation,
     spot_detection, analyze_rna_density, line_scan,
+    normalize_optional_channel,
 )
 
 try:
@@ -84,8 +86,15 @@ channel_names = {
     'DAPI': "DAPI",
     'brightfield': "brightfield",
 }
-Cy5 = channel_names['Cy5']
-mCherry = channel_names['mCherry']
+channel_indices = {
+    'Cy5': 0,
+    'mCherry': 1,
+    'FITC': 2,
+    'DAPI': 3,
+    'brightfield': None,
+}
+Cy5 = normalize_optional_channel(channel_names.get('Cy5'))
+mCherry = normalize_optional_channel(channel_names.get('mCherry'))
 
 # Pipeline flags
 run_cell_segmentation = True
@@ -103,23 +112,26 @@ nuclei_diameter = 70
 # 2. Load images
 # ============================================================================
 
-bf_result = load_images(
-    image_path=str(image_ref),
-    output_directory=output_directory,
-    channel_names={'brightfield': 'brightfield'},
-    slice_to_plot=12,
-)
+bf_result = None
+if image_ref is not None:
+    bf_result = load_images(
+        image_path=str(image_ref),
+        output_directory=output_directory,
+        channel_names={'brightfield': channel_names.get('brightfield')},
+        slice_to_plot=12,
+    )
 
 color_result = load_images(
     image_path=str(image_path),
     output_directory=output_directory,
-    channel_names={'Cy5': "mRNA1", 'mCherry': "mRNA2", 'FITC': None, 'DAPI': "DAPI"},
+    channel_names=channel_names,
+    channel_indices=channel_indices,
     slice_to_plot=12,
 )
 
 # Unpack results
 bf = bf_result['bf'] if bf_result else None
-image_name = bf_result['image_name'] if bf_result else "unknown"
+image_name = bf_result['image_name'] if bf_result else (color_result['image_name'] if color_result else "unknown")
 
 image_Cy5 = color_result['image_Cy5'] if color_result else None
 image_mCherry = color_result['image_mCherry'] if color_result else None
@@ -128,6 +140,16 @@ Cy5_array = color_result['Cy5_array'] if color_result else None
 mCherry_array = color_result['mCherry_array'] if color_result else None
 grid_width = color_result.get('grid_width', 80) if color_result else 80
 grid_height = color_result.get('grid_height', 80) if color_result else 80
+
+
+def first_analysis_shape():
+    for array in (Cy5_array, mCherry_array):
+        if array is not None:
+            return array.shape[-2:]
+    for image in (image_Cy5, image_mCherry, image_nuclei, bf):
+        if image is not None:
+            return image.shape[-2:]
+    return None
 
 # ============================================================================
 # 3. Segmentation
@@ -183,6 +205,15 @@ if run_cell_segmentation and bf is not None and image_nuclei is not None:
     if features_df is None:
         run_cell_classifier = False
 
+elif run_cell_segmentation and bf is None and image_nuclei is not None:
+    print("Running nuclear-only segmentation because no brightfield/reference image was loaded.")
+    masks_nuclei = nuclear_segmentation(image_nuclei)
+    masks_cytosol = masks_nuclei
+    cell_stage = "nuclei-only"
+    run_cell_classifier = False
+    tiff.imwrite(os.path.join(output_directory, "masks_nuclei.tif"), masks_nuclei.astype(masks_nuclei.dtype))
+    tiff.imwrite(os.path.join(output_directory, "masks_cytosol.tif"), masks_cytosol.astype(masks_cytosol.dtype))
+
 # Fallback: whole-embryo segmentation
 if (masks_cytosol is None or fallback_to_embryo) and bf is not None and image_nuclei is not None:
     print("Running fallback whole-embryo segmentation...")
@@ -192,6 +223,14 @@ if (masks_cytosol is None or fallback_to_embryo) and bf is not None and image_nu
     )
     run_cell_classifier = False
     features_df = None
+
+if run_spot_detection and masks_cytosol is None:
+    analysis_shape = first_analysis_shape()
+    if analysis_shape is not None:
+        print("No segmentation mask available; using a whole-image mask for spot detection.")
+        masks_cytosol = np.ones(analysis_shape, dtype=np.uint16)
+        run_cell_classifier = False
+        features_df = None
 
 # ============================================================================
 # 4. Spot detection
@@ -227,37 +266,36 @@ sum_spots_ch0 = sum(list_spots_in_each_cell_ch0) if list_spots_in_each_cell_ch0 
 sum_spots_ch1 = sum(list_spots_in_each_cell_ch1) if list_spots_in_each_cell_ch1 else None
 
 if any(x is not None for x in [sum_spots_ch0, sum_spots_ch1]):
-    data_wide = {
-        'Image ID': image_name,
-        f'{Cy5} total molecules': sum_spots_ch0,
-        f'{mCherry} total molecules': sum_spots_ch1,
-    }
+    data_wide = {'Image ID': image_name}
+    if Cy5 is not None and sum_spots_ch0 is not None:
+        data_wide[f'{Cy5} total molecules'] = sum_spots_ch0
+    if mCherry is not None and sum_spots_ch1 is not None:
+        data_wide[f'{mCherry} total molecules'] = sum_spots_ch1
     df_quantification = pd.DataFrame([data_wide])
     quantification_output = os.path.join(output_directory, f'total_mRNA_counts_{image_name}.csv')
     df_quantification.to_csv(quantification_output, index=False)
     print("Saved wide CSV with total abundance:")
     print(df_quantification)
 
-    # Per-cell long format (only if classifier succeeded)
-    if features_df is not None:
-        num_cells = max(len(list_spots_in_each_cell_ch0), len(list_spots_in_each_cell_ch1))
+    num_regions = max(len(list_spots_in_each_cell_ch0), len(list_spots_in_each_cell_ch1))
+    if num_regions > 0:
         rows_long = []
-        for i in range(num_cells):
-            row = {
-                'Image ID': image_name,
-                f'{Cy5}': list_spots_in_each_cell_ch0[i] if i < len(list_spots_in_each_cell_ch0) else None,
-                f'{mCherry}': list_spots_in_each_cell_ch1[i] if i < len(list_spots_in_each_cell_ch1) else None,
-                'label': features_df.at[i, "highest_confidence_label"],
-                'confidence': round(features_df.at[i, "prediction_confidence"], 3),
-            }
+        for i in range(num_regions):
+            row = {'Image ID': image_name, 'region_id': i + 1}
+            if Cy5 is not None and list_spots_in_each_cell_ch0:
+                row[Cy5] = list_spots_in_each_cell_ch0[i] if i < len(list_spots_in_each_cell_ch0) else 0
+            if mCherry is not None and list_spots_in_each_cell_ch1:
+                row[mCherry] = list_spots_in_each_cell_ch1[i] if i < len(list_spots_in_each_cell_ch1) else 0
+            if features_df is not None:
+                row['label'] = features_df.at[i, "highest_confidence_label"]
+                row['confidence'] = round(features_df.at[i, "prediction_confidence"], 3)
             rows_long.append(row)
         df_long = pd.DataFrame(rows_long)
-        long_output = os.path.join(output_directory, f'per_cell_mRNA_counts_{image_name}.csv')
+        output_prefix = "per_cell" if features_df is not None else "per_region"
+        long_output = os.path.join(output_directory, f'{output_prefix}_mRNA_counts_{image_name}.csv')
         df_long.to_csv(long_output, index=False)
-        print("Saved per-cell CSV:")
+        print("Saved per-cell CSV:" if features_df is not None else "Saved per-region CSV:")
         print(df_long)
-    else:
-        print("Skipping per-cell quantification (no classifier output).")
 
 # ============================================================================
 # 5. Spatial analysis of mRNA

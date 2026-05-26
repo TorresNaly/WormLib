@@ -27,6 +27,13 @@ export FITC="nothing"
 export DAPI="DAPI"
 export brightfield="brightfield"
 
+# Channel indices are zero-based within the image stack. Set unused channels to "nothing" above.
+export CY5_INDEX="0"
+export MCHERRY_INDEX="1"
+export FITC_INDEX="2"
+export DAPI_INDEX="3"
+export BRIGHTFIELD_INDEX="nothing"
+
 # 2. Select image type
 export DV_IMAGES="True"
 export ND2_IMAGES="False"

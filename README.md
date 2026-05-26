@@ -111,7 +111,8 @@ my_experiment/
         └── embryo_001_R3D_REF.dv   # 2D brightfield/reference image
 ```
 
-For `.dv` stacks, WormLib assigns channels by order:
+For `.dv` stacks, WormLib assigns channels by zero-based order. These defaults
+match the bundled example:
 
 | Channel index | WormLib name | Typical use |
 |---------------|--------------|-------------|
@@ -120,10 +121,13 @@ For `.dv` stacks, WormLib assigns channels by order:
 | 2 | `FITC` | optional channel |
 | 3 | `DAPI` | nuclei |
 
+If your channel order is different, set `CY5_INDEX`, `MCHERRY_INDEX`,
+`FITC_INDEX`, and `DAPI_INDEX` before running the CLI.
+
 #### Nikon `.nd2`
 
 For `.nd2`, WormLib expects a stack shaped like time/z by channel by y by x.
-Channels are assigned in this order:
+Channels are assigned in this zero-based order by default:
 
 | Channel index | WormLib name | Typical use |
 |---------------|--------------|-------------|
@@ -133,61 +137,175 @@ Channels are assigned in this order:
 | 3 | `DAPI` | nuclei |
 | 4 | `brightfield` | brightfield/reference |
 
+If a channel is missing, set its name to `nothing` or `None`. For example,
+`mCherry=nothing` tells WormLib not to load or analyze a second RNA channel.
+
 TIFF loading is available, but the full segmentation + smFISH workflow is most
 straightforward with DV or ND2 data that includes both nuclear and brightfield
 information.
 
+#### Choosing Channels
+
+WormLib now uses semantic channel roles. A config file tells WormLib which image
+channel is nuclei, which image channel is brightfield/reference, and which image
+channels are RNA channels.
+
+| Setting | Meaning | Example |
+|---------|---------|---------|
+| `channels.rna[].name` | The RNA label used in output files and plots | `par-3` |
+| `channels.rna[].fluorophore` | The physical fluorophore or microscope channel name, for human readability | `Alexa647` |
+| `channels.rna[].index` | The zero-based position of that RNA in the image stack | `0` |
+| `channels.nuclei.index` | The zero-based channel position used for nuclei segmentation | `3` |
+| `channels.brightfield.index` | The zero-based channel position used for brightfield/reference, if it is inside the stack | `4` |
+
+The RNA channel names are fully user-defined. They do not need to be `Cy5` or
+`mCherry`. For example, if your only RNA channel is physically Alexa 647, name it
+after the target gene and record the fluorophore separately:
+
+```yaml
+channels:
+  rna:
+    - name: par-3
+      fluorophore: Alexa647
+      index: 0
+      spot_radius_nm: [1409, 340, 340]
+      detection_color: red
+```
+
+To skip a channel, omit it from the config or set its `name` to `null`:
+
+```yaml
+channels:
+  nuclei:
+    name: DAPI
+    index: 3
+  brightfield:
+    name: null
+    index: null
+  rna:
+    - name: my_gene
+      index: 0
+      spot_radius_nm: [1409, 340, 340]
+```
+
+If a channel exists but is in a different position than the bundled example,
+change only the index:
+
+```yaml
+channels:
+  nuclei:
+    name: DAPI
+    index: 0
+  rna:
+    - name: my_gene
+      index: 1
+      spot_radius_nm: [1409, 340, 340]
+```
+
+The channel indices must match the order in the loaded image stack. DeltaVision
+data are treated as `channel, z, y, x`; ND2 data are treated as `time/z, channel,
+y, x`.
+
+#### What Is Required?
+
+Different parts of the pipeline need different channels:
+
+| Goal | Required channels | Optional channels | Notes |
+|------|-------------------|-------------------|-------|
+| Load and inspect channels | at least one supported image file | any channel can be skipped | Produces a channel overview for loaded channels. |
+| Whole-embryo segmentation | `brightfield` and `DAPI` | RNA channels | The current embryo segmentation function uses brightfield for the embryo boundary and DAPI for nuclei. |
+| Cell segmentation and blastomere classification | `brightfield` and `DAPI` | RNA channels | Classification only runs when segmentation detects the expected 2-cell or 4-cell mask count. |
+| Spot detection in segmented embryo/cells | at least one RNA channel plus a segmentation mask | second RNA channel | Best for total or per-cell/region molecule counts. |
+| Spot detection with DAPI only, no brightfield | one RNA channel and `DAPI` | second RNA channel | WormLib uses nuclear masks, so counts are nuclear-region counts, not whole-cell counts. |
+| Spot detection with RNA only | one RNA channel | all segmentation channels | WormLib uses one whole-image mask, so only whole-image counts are meaningful. |
+
+For true whole-embryo segmentation, **brightfield/reference and DAPI are both
+necessary** in the current pipeline. If either one is missing, WormLib can still
+run limited spot-detection workflows, but it cannot produce a true embryo/cell
+mask.
+
 ### 3. Run Your Own Image Locally
 
-From the repository root, set the input folder, output folder, microscope
-metadata, channel names, and pipeline options:
+From the repository root, copy one of the example configs, edit the paths and
+channel indices, then run it:
 
 ```bash
 conda activate wormlib
 cd /path/to/WormLib
 
-mkdir -p /path/to/results/embryo_001
-
-export FOLDER_NAME="/path/to/my_experiment/input/embryo_001"
-export OUTPUT_DIRECTORY="/path/to/results/embryo_001"
-
-# Microscope calibration, in nm, as Z,Y,X
-export VOXEL_SIZE="1448,450,450"
-export SPOT_RADIUS_CH0="1409,340,340"
-export SPOT_RADIUS_CH1="1283,310,310"
-
-# Output labels for channels. Use FITC="nothing" if no FITC channel exists.
-export Cy5="mRNA1"
-export mCherry="mRNA2"
-export FITC="nothing"
-export DAPI="DAPI"
-export brightfield="brightfield"
-
-# Pipeline switches
-export RUN_CELL_SEGMENTATION="True"
-export RUN_CELL_CLASSIFIER="True"
-export RUN_EMBRYO_SEGMENTATION="False"
-export SPOT_DETECTION="True"
-export RUN_mRNA_HEATMAPS="True"
-export RUN_RNA_DENSITY_ANALYSIS="True"
-export RUN_LINE_SCAN_ANALYSIS="True"
-
-python src/wormlib.py
+cp config/examples/two_rna_full.yml config/my_experiment.yml
+# edit config/my_experiment.yml for your image paths and channel positions
+python src/wormlib.py --config config/my_experiment.yml
 ```
 
-You can also pass the input and output paths directly:
+You can override the input and output paths from the command line while keeping
+the rest of the config:
 
 ```bash
-python src/wormlib.py /path/to/my_experiment/input/embryo_001 /path/to/results/embryo_001
+python src/wormlib.py --config config/my_experiment.yml \
+  /path/to/my_experiment/input/embryo_001 \
+  /path/to/results/embryo_001
 ```
 
 WormLib automatically detects `.dv`, `.nd2`, `.tif`, or `.tiff` files in the
 input path.
 
-### 4. Configure the Example Script Instead
+The old environment-variable interface still works for existing scripts, but
+YAML configs are the recommended interface for new users.
 
-If you prefer editing a Python file, open `examples/wormlib_example.py` and
-change Section 1:
+### 4. Minimal Channel Workflows
+
+WormLib can run with missing optional channels:
+
+| Available channels | Example config | What happens |
+|--------------------|----------------|--------------|
+| brightfield + DAPI + two RNAs | `config/examples/two_rna_full.yml` | Full standard pipeline. |
+| brightfield + DAPI + one RNA | `config/examples/one_rna_full.yml` | Segmentation and one-channel spot detection run; CSVs include only the available RNA. |
+| brightfield + DAPI, no RNA | remove all `channels.rna` entries and set `spot_detection: false` | Segmentation/reporting can run, but no molecule counts are generated. |
+| DAPI + one RNA, no brightfield | `config/examples/dapi_one_rna_no_brightfield.yml` | Nuclear-only segmentation and one-channel spot detection run. |
+| one RNA only | `config/examples/rna_only_spot_detection.yml` | Spot detection runs with one whole-image mask; use only whole-image counts. |
+| brightfield + one RNA, no DAPI | set `channels.nuclei.name: null` | True embryo/cell segmentation will not run; spot detection falls back to a whole-image mask. |
+
+For a DAPI + single-RNA DeltaVision stack where RNA is channel 0 and DAPI is
+channel 3, the config looks like:
+
+```yaml
+input:
+  path: /path/to/embryo_001_R3D.dv
+  output_directory: /path/to/results/embryo_001
+
+channels:
+  nuclei:
+    name: DAPI
+    index: 3
+  brightfield:
+    name: null
+    index: null
+  rna:
+    - name: my_gene
+      fluorophore: Alexa647
+      index: 0
+      spot_radius_nm: [1409, 340, 340]
+
+pipeline:
+  cell_segmentation: true
+  cell_classification: false
+  spot_detection: true
+  heatmaps: false
+  rna_density: false
+  line_scan: false
+```
+
+In this mode, the mask is nuclear rather than whole-cell or whole-embryo. That is
+appropriate for nuclear spot counts, but it is not a substitute for cytoplasmic
+or whole-embryo RNA quantification.
+
+### 5. Configure the Example Script Instead
+
+If you prefer editing a Python file, open `examples/wormlib_example.py`. The
+CLI/config path above is recommended for most users, but the example script still
+shows how to call library functions directly. In Section 1, set paths and
+channels:
 
 ```python
 # Define image path and microscope parameters
@@ -202,10 +320,18 @@ spot_radius_ch1 = (1283, 310, 310)   # PSF for mCherry channel
 # Channel assignments
 channel_names = {
     "Cy5": "mRNA1",
-    "mCherry": "mRNA2",
+    "mCherry": None,
     "FITC": None,
     "DAPI": "DAPI",
     "brightfield": "brightfield",
+}
+
+channel_indices = {
+    "Cy5": 0,
+    "mCherry": 1,
+    "FITC": 2,
+    "DAPI": 3,
+    "brightfield": None,
 }
 
 # Enable pipeline steps
@@ -223,7 +349,7 @@ Then run:
 python examples/wormlib_example.py
 ```
 
-### 5. Understand the Outputs
+### 6. Understand the Outputs
 
 Each output directory can include:
 
@@ -235,6 +361,7 @@ Each output directory can include:
 | `total_mRNA_counts_*.csv` | Total molecule counts per RNA channel |
 | `per_cell_mRNA_counts_*.csv` | Per-cell counts and predicted labels, when classification succeeds |
 | `quantification_cell_*.csv` | Compatibility copy of per-cell counts for batch aggregation |
+| `per_region_mRNA_counts_*.csv` | Region-level counts when classification is disabled or unavailable |
 | `*_detection_*.png`, `*_threshold_*.png` | BigFISH detection diagnostics |
 | `*_AP_profile_data_*.csv` | RNA density along the AP axis |
 | `*_line_scan_data_*.csv` and `*_line_density_data_*.csv` | ROI line-scan outputs |
@@ -300,6 +427,8 @@ WormLib/
 ├── examples/
 │   ├── wormlib_example.py        # Pipeline example script
 │   └── run-WormLib.sh            # SLURM batch script
+├── config/
+│   └── examples/                 # Copy-and-edit YAML pipeline configs
 ├── models/                       # Trained ML classifiers
 │   ├── 2-cell_classification_RFmodel.joblib
 │   ├── 4-cell_classification_RFmodel.joblib

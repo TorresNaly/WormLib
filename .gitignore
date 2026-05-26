@@ -9,7 +9,9 @@ temp/
 config.yml
 merged
 dataBases/
-config
+config/*
+!config/examples/
+!config/examples/*.yml
 **/[C]onfig*
 temp_*
 ~$*
