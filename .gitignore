@@ -45,3 +45,4 @@ human_genome/
 *.cds.all.fa
 processing_long_movies/
 data/
+.agent/
