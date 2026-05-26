@@ -12,7 +12,8 @@
 local_download_directory="$1"
 input_directory="${local_download_directory}/input"
 subdirectories=("$input_directory"/*)
-python_script_path="./WormLib.py"
+script_dir=$(dirname "$0")
+python_script_path="${script_dir}/../src/wormlib.py"
 
 # 1. Define PSF parameters and channel names (set to None if the channel does not exist)
 export SPOT_RADIUS_CH0="1409,340,340"

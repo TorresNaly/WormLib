@@ -18,7 +18,7 @@ from scipy.ndimage import label, center_of_mass
 import cv2
 import tifffile as tiff
 from skimage import measure, morphology, filters
-from skimage.measure import regionprops_table
+from skimage.measure import regionprops, regionprops_table
 from skimage.morphology import erosion, disk
 from skimage.util import img_as_float
 
@@ -159,38 +159,39 @@ def load_images(image_path, output_directory, channel_names, slice_to_plot=0):
         
         print(f'Image ID: {image_name}\n')
         
-        # Process the image stack
-        image_stack = list_images[0].astype(np.uint16)
-        print(f'Image shape: {image_stack.shape}')
-        
-        # === KEY FIX: Check dimensions FIRST, then assign based on what's requested ===
-        if image_stack.ndim == 2:
-            # 2D image - assign to brightfield ONLY if requested
-            if brightfield is not None:
-                bf = image_stack
-                print("Loaded 2D brightfield image")
+        # Process all loaded image stacks
+        for img_idx, img_stack in enumerate(list_images):
+            image_stack = img_stack.astype(np.uint16)
+            print(f'Processing file {dv_files[img_idx]} with shape: {image_stack.shape}')
             
-        elif image_stack.ndim == 4:
-            # 4D stack [C, Z, Y, X] - assign color channels ONLY if requested
-            image_colors = image_stack
-            
-            if Cy5 is not None and image_colors.shape[0] > 0:
-                Cy5_array = image_colors[0, :, :, :]
-                image_Cy5 = np.max(Cy5_array, axis=0)
-            
-            if mCherry is not None and image_colors.shape[0] > 1:
-                mCherry_array = image_colors[1, :, :, :]
-                image_mCherry = np.max(mCherry_array, axis=0)
-            
-            if FITC is not None and image_colors.shape[0] > 2:
-                FITC_array = image_colors[2, :, :, :]
-                image_FITC = np.max(FITC_array, axis=0)
-            
-            if DAPI is not None and image_colors.shape[0] > 3:
-                nuclei_array = image_colors[3, :, :, :]
-                image_nuclei = np.max(nuclei_array, axis=0)
-            
-            print("Loaded 4D color channel stack")
+            # === KEY FIX: Check dimensions FIRST, then assign based on what's requested ===
+            if image_stack.ndim == 2:
+                # 2D image - assign to brightfield ONLY if requested
+                if brightfield is not None:
+                    bf = image_stack
+                    print("Loaded 2D brightfield image")
+                
+            elif image_stack.ndim == 4:
+                # 4D stack [C, Z, Y, X] - assign color channels ONLY if requested
+                image_colors = image_stack
+                
+                if Cy5 is not None and image_colors.shape[0] > 0:
+                    Cy5_array = image_colors[0, :, :, :]
+                    image_Cy5 = np.max(Cy5_array, axis=0)
+                
+                if mCherry is not None and image_colors.shape[0] > 1:
+                    mCherry_array = image_colors[1, :, :, :]
+                    image_mCherry = np.max(mCherry_array, axis=0)
+                
+                if FITC is not None and image_colors.shape[0] > 2:
+                    FITC_array = image_colors[2, :, :, :]
+                    image_FITC = np.max(FITC_array, axis=0)
+                
+                if DAPI is not None and image_colors.shape[0] > 3:
+                    nuclei_array = image_colors[3, :, :, :]
+                    image_nuclei = np.max(nuclei_array, axis=0)
+                
+                print("Loaded 4D color channel stack")
         
         grid_width, grid_height = 80, 80
     
@@ -505,7 +506,7 @@ def segmentation(image_cytosol,image_nuclei, second_image_cytosol=None,output_di
 # #Sort images based on nuclei
 def get_cell_stage_and_size_filtered(masks_nuclei, voxel_size, min_fraction_median=0.2, verbose=True):
     # Label connected components
-    labeled_mask, num_nuclei = label(masks_nuclei, return_num=True)
+    labeled_mask, num_nuclei = label(masks_nuclei)
     
     # XY pixel size in nm
     pixel_size_xy = voxel_size[1]
@@ -566,6 +567,12 @@ def get_cell_stage_and_size_filtered(masks_nuclei, voxel_size, min_fraction_medi
 
 
 # Suppress just the InconsistentVersionWarning
+try:
+    from sklearn.exceptions import InconsistentVersionWarning
+except ImportError:
+    class InconsistentVersionWarning(UserWarning):
+        pass
+
 warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
 
 
@@ -1782,9 +1789,6 @@ def spot_detection(rna,voxel_size,spot_radius,masks_cytosol):
     )
 
 
-    #spots_no_ts, _, ts = multistack.remove_transcription_site(spotDetectionCSV, clusterDetectionCSV, mask_nuc, ndim=3)
-    #spots_in_region, _ = multistack.identify_objects_in_region(mask, spots_post_clustering[:,:3], ndim=3)
-
     # Separating and counting the spots in each cell
     number_masks_cyto = np.max(masks_cytosol)
     list_spots_in_each_cell =[]
@@ -1798,4 +1802,757 @@ def spot_detection(rna,voxel_size,spot_radius,masks_cytosol):
         list_clusters_in_each_cell.append(len( clusters_in_region ))
         del spots_in_region, clusters_in_region
     return spots_post_clustering, clusters, list_spots_in_each_cell, list_clusters_in_each_cell
+
+
+def analyze_rna_density(image, masks_cytosol, colormap, mRNA_name, image_name, output_directory):
+    """
+    Analyze RNA intensity along the embryo AP axis defined by an ellipse.
+    """
+    import matplotlib.patches as patches
+    # If the image is 3D (z, y, x), perform max projection
+    if image.ndim == 3:
+        image_proj = np.max(image, axis=0)  # max projection along z-axis
+    else:
+        image_proj = image
+
+    binary_image = masks_cytosol.astype(np.uint8)
+
+    # Find contours in the binary image
+    contours = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+
+    if contours:
+        cnt = max(contours, key=cv2.contourArea)
+
+        if len(cnt) >= 5:  # At least 5 points needed to fit an ellipse
+            ellipse = cv2.fitEllipse(cnt)
+            (xc, yc), (d1, d2), angle = ellipse  # d1 = major axis, d2 = minor axis
+
+            fig, ax = plt.subplots()
+            ax.imshow(image_proj, cmap='gray')
+
+            ellipse_patch = patches.Ellipse(
+                xy=(xc, yc), width=d1, height=d2, angle=angle,
+                edgecolor='r', facecolor='none', linewidth=2
+            )
+            ax.add_patch(ellipse_patch)
+
+            num_lines = 50
+            line_positions = np.linspace(-d2 / 2, d2 / 2, num_lines)
+            colormap_values = plt.get_cmap(colormap)(np.linspace(0, 1, num_lines))
+
+            mean_intensities = []
+
+            for i, y in enumerate(line_positions[:-1]):
+                x1, y1 = (
+                    xc + (d1 / 2) * np.cos(np.deg2rad(angle)) - (y * np.sin(np.deg2rad(angle))),
+                    yc + (d1 / 2) * np.sin(np.deg2rad(angle)) + (y * np.cos(np.deg2rad(angle)))
+                )
+                x2, y2 = (
+                    xc - (d1 / 2) * np.cos(np.deg2rad(angle)) - (y * np.sin(np.deg2rad(angle))),
+                    yc - (d1 / 2) * np.sin(np.deg2rad(angle)) + (y * np.cos(np.deg2rad(angle)))
+                )
+                
+                # Plot the line segment on the max projection image
+                ax.plot([x1, x2], [y1, y2], color=colormap_values[i], linestyle='-', linewidth=0.5)
+
+                line_coords = np.array([[int(round(yc)), int(round(xc))] for yc, xc in zip(np.linspace(y1, y2, num_lines), np.linspace(x1, x2, num_lines))])
+
+                # Make sure line_coords are inside image bounds
+                valid_mask = (
+                    (line_coords[:, 0] >= 0) & (line_coords[:, 0] < image_proj.shape[0]) &
+                    (line_coords[:, 1] >= 0) & (line_coords[:, 1] < image_proj.shape[1])
+                )
+                valid_coords = line_coords[valid_mask]
+
+                pixel_values = image_proj[valid_coords[:, 0], valid_coords[:, 1]]
+
+                mean_intensity = np.mean(pixel_values) if len(pixel_values) > 0 else 0
+                mean_intensities.append(mean_intensity)
+
+            mean_intensities = np.array(mean_intensities)
+            max_intensity = np.max(mean_intensities)
+            if max_intensity > 0:
+                normalized_intensity = mean_intensities / max_intensity
+            else:
+                normalized_intensity = mean_intensities
+
+            ax.scatter(xc, yc, color='red', s=50, label='Ellipse Center')
+
+            ellipse_plot_path = os.path.join(output_directory, f'{mRNA_name}_ellipse_ROI_{image_name}.png')
+            plt.title(f"Ellipse ROI for {mRNA_name}")
+            plt.xlabel("X Coordinate")
+            plt.ylabel("Y Coordinate")
+            ax.set_axis_off()
+            plt.legend()
+            plt.axis('equal')
+            plt.savefig(ellipse_plot_path, bbox_inches='tight', dpi=300)
+            plt.close()
+
+            # Plot normalized intensity along AP axis (flip so AB = 0 μm)
+            positions = np.linspace(0, 100, len(normalized_intensity))
+
+            fig, ax = plt.subplots()
+
+            for i in range(len(positions)):
+                ax.scatter(positions[i], normalized_intensity[i], color=colormap_values[i], s=50,
+                           label=f'Grid {i}' if i == 0 else "")
+
+            ax.plot(positions, normalized_intensity, color='gray', linestyle='-', linewidth=1)
+            ax.set_xlabel('Position along Body Axis (% distance)')
+            ax.set_ylabel('Normalized Mean Pixel Intensity')
+            ax.set_title(f'{mRNA_name} Normalized Intensity Along Body Axis')
+
+            # Add minor ticks for precise % counting
+            ax.set_xticks(np.arange(0, 101, 10))   # major ticks every 10%
+            ax.set_xticks(np.arange(0, 101, 1), minor=True)  # minor ticks every 1%
+            ax.tick_params(axis='x', which='minor', length=5, color='k')  # minor tick length
+            ax.tick_params(axis='x', which='major', length=10, color='k')  # major tick length
+
+            plt.tight_layout()
+            scatter_plot_path = os.path.join(output_directory, f'{mRNA_name}_AP_profile_{image_name}.png')
+            plt.savefig(scatter_plot_path, bbox_inches='tight', dpi=300)
+            plt.close()
+
+            # Save the raw density data to a CSV
+            density_data = pd.DataFrame({
+                'Image_ID': image_name,
+                'Position (μm)': positions,
+                f'{mRNA_name} Normalized density': normalized_intensity
+            })
+            output_path = os.path.join(output_directory, f'{mRNA_name}_AP_profile_data_{image_name}.csv')
+            density_data.to_csv(output_path, index=False)
+        else:
+            print(f"Not enough points to fit an ellipse for {mRNA_name}.")
+    else:
+        print(f"No contours found in the mask for {mRNA_name}.")
+
+
+def line_scan(image, masks_cytosol, colormap, mRNA_name, image_name, output_directory, run_cell_classifier=False, features_df=None, df_long=None):
+    """
+    Analyze RNA intensity along the body axis with cell area normalized shading.
+    """
+    import matplotlib.patches as patches
+    from matplotlib.path import Path as MPLPath
+    
+    # If the image is 3D (z, y, x), perform max projection
+    if image.ndim == 3:
+        image_proj = np.max(image, axis=0)  # max projection along z-axis
+    else:
+        image_proj = image
+
+    binary_image = masks_cytosol.astype(np.uint8)
+
+    # Find contours in the binary image
+    contours = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
+
+    if contours:
+        cnt = max(contours, key=cv2.contourArea)
+
+        if len(cnt) >= 5:  # At least 5 points needed to fit an ellipse
+            ellipse = cv2.fitEllipse(cnt)
+            (xc, yc), (d1, d2), angle = ellipse  # d1 = major axis, d2 = minor axis
+
+            fig, ax = plt.subplots()
+            ax.imshow(image_proj, cmap='gray')
+
+            ellipse_patch = patches.Ellipse(xy=(xc, yc), width=d1, height=d2, angle=angle,
+                                            edgecolor='r', facecolor='none', linewidth=2)
+            ax.add_patch(ellipse_patch)
+
+            rect_length = d1 * 0.3
+            rect_width = d2 * 1
+
+            rotated_rect = ((xc, yc), (rect_width, rect_length), angle + 90)
+            box_points = cv2.boxPoints(rotated_rect)
+            box_points = np.intp(box_points)
+
+            rectangle_patch = patches.Polygon(
+                box_points,
+                closed=True,
+                edgecolor='yellow',
+                facecolor='none',
+                linewidth=2,
+                linestyle='--',
+                label='Minor Axis ROI'
+            )
+            ax.add_patch(rectangle_patch)
+
+            # Create a Path object from the rectangle to check if points lie inside
+            rect_path = MPLPath(box_points)
+
+            num_lines = 50
+            line_positions = np.linspace(-d2 / 2, d2 / 2, num_lines)
+
+            colormap_values = plt.get_cmap(colormap)(np.linspace(0, 1, num_lines))
+
+            mean_intensities = []
+
+            for i, y in enumerate(line_positions[:-1]):
+                x1, y1 = (
+                    xc + (d1 / 2) * np.cos(np.deg2rad(angle)) - (y * np.sin(np.deg2rad(angle))),
+                    yc + (d1 / 2) * np.sin(np.deg2rad(angle)) + (y * np.cos(np.deg2rad(angle)))
+                )
+                x2, y2 = (
+                    xc - (d1 / 2) * np.cos(np.deg2rad(angle)) - (y * np.sin(np.deg2rad(angle))),
+                    yc - (d1 / 2) * np.sin(np.deg2rad(angle)) + (y * np.cos(np.deg2rad(angle)))
+                )
+
+                # Clip the line segment to rectangle ROI
+                n_points = 100
+                xs = np.linspace(x1, x2, n_points)
+                ys = np.linspace(y1, y2, n_points)
+                points = np.vstack((xs, ys)).T
+
+                inside_mask = rect_path.contains_points(points)
+                if not any(inside_mask):
+                    continue  # Skip if no points inside ROI
+
+                inside_points = points[inside_mask]
+                clip_x1, clip_y1 = inside_points[0]
+                clip_x2, clip_y2 = inside_points[-1]
+
+                ax.plot([clip_x1, clip_x2], [clip_y1, clip_y2], color=colormap_values[i], linestyle='-', linewidth=0.5)
+
+                line_coords = np.array([[int(round(yc)), int(round(xc))] for yc, xc in zip(np.linspace(clip_y1, clip_y2, num_lines), np.linspace(clip_x1, clip_x2, num_lines))])
+
+                # Make sure line_coords are inside image bounds
+                valid_mask = (
+                    (line_coords[:, 0] >= 0) & (line_coords[:, 0] < image_proj.shape[0]) &
+                    (line_coords[:, 1] >= 0) & (line_coords[:, 1] < image_proj.shape[1])
+                )
+                valid_coords = line_coords[valid_mask]
+
+                pixel_values = image_proj[valid_coords[:, 0], valid_coords[:, 1]]
+
+                mean_intensity = np.mean(pixel_values) if len(pixel_values) > 0 else 0
+                mean_intensities.append(mean_intensity)
+
+            mean_intensities = np.array(mean_intensities)
+            max_intensity = np.max(mean_intensities)
+            if max_intensity > 0:
+                normalized_intensity = mean_intensities / max_intensity
+            else:
+                normalized_intensity = mean_intensities
+
+            ax.scatter(xc, yc, color='red', s=50, label='Ellipse Center')
+
+            ellipse_plot_path = os.path.join(output_directory, f'{mRNA_name}_line_ROI_{image_name}.png')
+            plt.title(f"Line scan for {mRNA_name}")
+            plt.xlabel("X Coordinate")
+            plt.ylabel("Y Coordinate")
+            ax.set_axis_off()
+            plt.legend()
+            plt.axis('equal')
+            plt.savefig(ellipse_plot_path, bbox_inches='tight', dpi=300)
+            plt.close()
+
+            # Dynamically set AP axis positions using rel_pos_minor (flip so AB = 0 μm)
+            positions = np.linspace(0, 100, len(normalized_intensity))
+
+            # Dynamically decide whether to flip based on AB orientation
+            if run_cell_classifier and features_df is not None:
+                if 'highest_confidence_label' in features_df.columns:
+                    ab_row = features_df[
+                        features_df['highest_confidence_label'].isin(['AB', 'ABa'])
+                    ]
+                    if not ab_row.empty:
+                        ab_orientation = ab_row['rel_pos_minor'].values[0]
+                        if ab_orientation > 0:  # AB is on left, need to flip
+                            positions = -positions  # temporarily -100 → 0
+                            positions = positions - positions.min()  # shift so min = 0 → 0 → 100
+            
+            # === Line scan plot WITHOUT cell area shading ===
+            fig, ax = plt.subplots()
+
+            # Compute AP-axis positions
+            ap_positions = []
+            if features_df is not None:
+                total_major = features_df['area'].sum()
+                current_pos = 0
+                for _, row in features_df.iterrows():
+                    frac = row['area'] / total_major * 100
+                    start = current_pos
+                    end = current_pos + frac
+                    ap_positions.append((start, end, row['highest_confidence_label']))
+                    current_pos = end
+
+            # Plot normalized intensity points and line
+            for i in range(len(positions)):
+                ax.scatter(
+                    positions[i],
+                    normalized_intensity[i],
+                    color=colormap_values[i],
+                    s=50,
+                    label=f'Grid {i}' if i == 0 else ""
+                )
+
+            ax.plot(positions, normalized_intensity, color='gray', linestyle='-', linewidth=1)
+            ax.set_xlabel('Position along Body Axis (% distance)')
+            ax.set_ylabel('Normalized Mean Pixel Intensity')
+            ax.set_title(f'{mRNA_name} Normalized Intensity Along Body Axis')
+
+            # Add minor ticks for precise % counting
+            ax.set_xticks(np.arange(0, 101, 10))   # major ticks every 10%
+            ax.set_xticks(np.arange(0, 101, 1), minor=True)  # minor ticks every 1%
+            ax.tick_params(axis='x', which='minor', length=5, color='k')
+            ax.tick_params(axis='x', which='major', length=10, color='k')
+
+            plt.tight_layout()
+            scatter_plot_path = os.path.join(
+                output_directory, f'{mRNA_name}_line_scan_{image_name}.png'
+            )
+            plt.savefig(scatter_plot_path, bbox_inches='tight', dpi=300)
+            plt.close()
+
+            #  -------- Line scan with cell area normalized shaded -------- #
+            if run_cell_classifier and features_df is not None and df_long is not None:
+                fig, ax = plt.subplots()
+
+                # Draw shaded regions for each cell
+                for start, end, label in ap_positions:
+                    color = 'C0' if label == 'AB' or label == 'ABa' else 'C1'
+                    ax.axvspan(start, end, color=color, alpha=0.2)
+                    
+                # Annotate each cell with label
+                for _, row in df_long.iterrows():
+                    label = row['label']
+                    start, end = None, None
+
+                    # Find start/end from AP-axis positions
+                    for s, e, l in ap_positions:
+                        if l == label:
+                            start, end = s, e
+                            break
+
+                    if start is not None and end is not None:
+                        mid = (start + end) / 2
+                        # Cell label on top
+                        ax.text(mid, 0.9, f"{label}", ha='center', va='bottom', fontsize=20, fontweight='bold',
+                                color='k', transform=ax.get_xaxis_transform())
+
+                # Scatter + line plot
+                for i in range(len(positions)):
+                    ax.scatter(positions[i], normalized_intensity[i], color=colormap_values[i], s=50,
+                               label=f'Grid {i}' if i == 0 else "")
+
+                ax.plot(positions, normalized_intensity, color='gray', linestyle='-', linewidth=1)
+                ax.set_xlabel('Position along Body Axis (% distance)')
+                ax.set_ylabel('Normalized Mean Pixel Intensity')
+                ax.set_title(f'{mRNA_name} Normalized Intensity Along Body Axis')
+
+                # Add minor ticks for precise % counting
+                ax.set_xticks(np.arange(0, 101, 10))   # major ticks every 10%
+                ax.set_xticks(np.arange(0, 101, 1), minor=True)  # minor ticks every 1%
+                ax.tick_params(axis='x', which='minor', length=5, color='k')  # minor tick length
+                ax.tick_params(axis='x', which='major', length=10, color='k')  # major tick length
+
+                plt.tight_layout()
+                scatter_plot_path = os.path.join(output_directory, f'{mRNA_name}_line_scan_shaded_{image_name}.png')
+                plt.savefig(scatter_plot_path, bbox_inches='tight', dpi=300)
+                plt.close()
+
+            # Save the raw density data to a CSV using both names
+            density_data = pd.DataFrame({
+                'Image_ID': image_name,
+                'Position (μm)': positions,
+                f'{mRNA_name} Normalized density': normalized_intensity
+            })
+            output_path_scan = os.path.join(output_directory, f'{mRNA_name}_line_scan_data_{image_name}.csv')
+            density_data.to_csv(output_path_scan, index=False)
+            output_path_density = os.path.join(output_directory, f'{mRNA_name}_line_density_data_{image_name}.csv')
+            density_data.to_csv(output_path_density, index=False)
+
+        else:
+            print(f"Not enough points to fit an ellipse for {mRNA_name}.")
+    else:
+        print(f"No contours found in the mask for {mRNA_name}.")
+
+
+if __name__ == "__main__":
+    import sys
+    from reportlab.pdfgen import canvas
+    from reportlab.platypus import Table, TableStyle
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from PIL import Image
+    import csv
+    from datetime import datetime
+    import matplotlib.patches as patches
+
+    print("Running WormLib CLI pipeline...")
+
+    # 1. Parse FOLDER_NAME and OUTPUT_DIRECTORY (command-line arguments or environment variables)
+    if len(sys.argv) >= 3:
+        folder_name = sys.argv[1]
+        output_directory_path = sys.argv[2]
+    else:
+        folder_name = os.getenv('FOLDER_NAME')
+        output_directory_path = os.getenv('OUTPUT_DIRECTORY')
+
+    if not folder_name or not output_directory_path:
+        print("ERROR: Both 'FOLDER_NAME' and 'OUTPUT_DIRECTORY' must be specified via arguments or environment variables.")
+        sys.exit(1)
+
+    output_directory = Path(output_directory_path)
+    output_directory.mkdir(parents=True, exist_ok=True)
+
+    print(f"Input Directory: {folder_name}")
+    print(f"Output Directory: {output_directory}")
+
+    # 2. Parse microscope and channel parameters from environment
+    voxel_size = tuple(map(int, os.getenv('VOXEL_SIZE', '1448,450,450').split(',')))
+    spot_radius_ch0 = tuple(map(int, os.getenv('SPOT_RADIUS_CH0', '1409,340,340').split(',')))
+    spot_radius_ch1 = tuple(map(int, os.getenv('SPOT_RADIUS_CH1', '1283,310,310').split(',')))
+
+    Cy5 = os.getenv('Cy5', 'mRNA1')
+    mCherry = os.getenv('mCherry', 'mRNA2')
+    FITC = os.getenv('FITC', 'nothing')
+    DAPI = os.getenv('DAPI', 'DAPI')
+    brightfield = os.getenv('brightfield', 'brightfield')
+
+    if FITC == 'nothing':
+        FITC = None
+
+    channel_names = {
+        'Cy5': Cy5,
+        'mCherry': mCherry,
+        'FITC': FITC,
+        'DAPI': DAPI,
+        'brightfield': brightfield
+    }
+
+    # Pipeline flags
+    run_embryo_segmentation = os.getenv('RUN_EMBRYO_SEGMENTATION', 'True') == 'True'
+    embryo_diameter = int(os.getenv('EMBRYO_DIAMETER', '500'))
+    nuclei_diameter = int(os.getenv('NUCLEI_DIAMETER', '70'))
+    run_cell_segmentation = os.getenv('RUN_CELL_SEGMENTATION', 'True') == 'True'
+    cell_diameter = int(os.getenv('CELL_DIAMETER', '250'))
+    run_cell_classifier = os.getenv('RUN_CELL_CLASSIFIER', 'True') == 'True'
+    run_spot_detection = (os.getenv('RUN_SPOT_DETECTION') or os.getenv('SPOT_DETECTION') or 'True') == 'True'
+    run_mRNA_heatmaps = os.getenv('RUN_mRNA_HEATMAPS', 'True') == 'True'
+    run_rna_density_analysis = os.getenv('RUN_RNA_DENSITY_ANALYSIS', 'True') == 'True'
+    run_line_scan_analysis = os.getenv('RUN_LINE_SCAN_ANALYSIS', 'True') == 'True'
+
+    # Print parsed settings
+    print(f"\nMicroscope Settings:\n  Voxel Size: {voxel_size}\n  Spot Radius Ch0: {spot_radius_ch0}\n  Spot Radius Ch1: {spot_radius_ch1}")
+    print(f"\nChannel Assignments:\n  Cy5: {Cy5}\n  mCherry: {mCherry}\n  FITC: {FITC}\n  DAPI: {DAPI}\n  brightfield: {brightfield}")
+
+    # Determine model paths relative to src directory
+    src_dir = Path(__file__).resolve().parent
+    main_dir = src_dir.parent
+    model_2cell_path = main_dir / "models/2-cell_classification_RFmodel.joblib"
+    model_4cell_path = main_dir / "models/4-cell_classification_RFmodel.joblib"
+
+    # 3. Load Images using the unified loader
+    loaded_result = load_images(folder_name, output_directory, channel_names, slice_to_plot=0)
+    if loaded_result is None:
+        print("ERROR: Image loading failed. Exiting.")
+        sys.exit(1)
+
+    image_type = loaded_result['image_type']
+    image_name = loaded_result['image_name']
+    bf = loaded_result['bf']
+    image_Cy5 = loaded_result['image_Cy5']
+    image_mCherry = loaded_result['image_mCherry']
+    image_FITC = loaded_result['image_FITC']
+    image_nuclei = loaded_result['image_nuclei']
+    Cy5_array = loaded_result['Cy5_array']
+    mCherry_array = loaded_result['mCherry_array']
+    FITC_array = loaded_result['FITC_array']
+    nuclei_array = loaded_result['nuclei_array']
+    grid_width = loaded_result['grid_width']
+    grid_height = loaded_result['grid_height']
+
+    print(f"\nSuccessfully loaded image: {image_name} (Format: {image_type.upper()})")
+
+    # 4. Cell Segmentation & Classification
+    masks_cytosol, masks_nuclei = None, None
+    cell_stage = "no-nuclei"
+    features_df = None
+
+    if run_cell_segmentation and bf is not None and image_nuclei is not None:
+        print("\nRunning single-cell segmentation...")
+        try:
+            masks_cytosol, masks_nuclei, _, _ = segmentation(bf, image_nuclei, second_image_cytosol=image_nuclei, output_directory=output_directory)
+            
+            # Save cell segmentation plot
+            segmentation_filename = os.path.join(output_directory, f'cell_segmentation_{image_name}.png')
+            plt.savefig(segmentation_filename, bbox_inches='tight')
+            plt.close()
+            print("Cell segmentation outlines saved.")
+
+            # Filter nuclei and determine stage
+            cell_stage, nuclei_sizes, masks_filtered = get_cell_stage_and_size_filtered(masks_nuclei, voxel_size)
+            print(f"Blastomere Stage: {cell_stage}")
+
+            # Run classifier
+            if run_cell_classifier:
+                if cell_stage == "2-cell" and model_2cell_path.exists():
+                    print("Running 2-cell blatomere classifier...")
+                    features_df = classify_2cell(masks_cytosol, bf, image_name, output_directory, model_path=str(model_2cell_path), verbose=True)
+                elif cell_stage == "4-cell" and model_4cell_path.exists():
+                    print("Running 4-cell blastomere classifier...")
+                    features_df = classify_4cell(masks_cytosol, bf, image_name, output_directory, model_path=str(model_4cell_path), verbose=True)
+                else:
+                    print(f"Skipping classifier: Stage '{cell_stage}' is not supported or models are missing.")
+        except Exception as e:
+            print(f"⚠️ Cell segmentation failed ({e}). Falling back to whole-embryo segmentation.")
+            cell_stage = "no-nuclei"
+
+    # Fallback to embryo segmentation if cell stage couldn't be determined or cell segmentation was skipped
+    if cell_stage == "no-nuclei" or masks_cytosol is None:
+        if run_embryo_segmentation and bf is not None:
+            print("\nRunning fallback whole-embryo segmentation...")
+            masks_cytosol, masks_nuclei, _, _ = embryo_segmentation(bf, image_nuclei, image_name, output_directory)
+        else:
+            print("Skipping segmentation.")
+
+    # 5. Spot Detection
+    list_spots_in_each_cell_ch0, list_spots_in_each_cell_ch1 = None, None
+    spots_post_clustering_ch0, spots_post_clustering_ch1 = None, None
+
+    if run_spot_detection and masks_cytosol is not None:
+        print("\nRunning smFISH spot detection...")
+        if Cy5 is not None and image_Cy5 is not None and Cy5_array is not None:
+            print(f"Detecting {Cy5} molecules...")
+            rna_channel = Cy5
+            detection_color = "red"
+            spots_post_clustering_ch0, clusters_ch0, list_spots_in_each_cell_ch0, _ = spot_detection(Cy5_array, voxel_size, spot_radius_ch0, masks_cytosol)
+
+        if mCherry is not None and image_mCherry is not None and mCherry_array is not None:
+            print(f"Detecting {mCherry} molecules...")
+            rna_channel = mCherry
+            detection_color = "blue"
+            spots_post_clustering_ch1, clusters_ch1, list_spots_in_each_cell_ch1, _ = spot_detection(mCherry_array, voxel_size, spot_radius_ch1, masks_cytosol)
+
+        # 6. Save Spot Abundance Tables (CSVs)
+        sum_spots_ch0 = sum(list_spots_in_each_cell_ch0) if list_spots_in_each_cell_ch0 is not None else None
+        sum_spots_ch1 = sum(list_spots_in_each_cell_ch1) if list_spots_in_each_cell_ch1 is not None else None
+
+        if sum_spots_ch0 is not None or sum_spots_ch1 is not None:
+            # Wide format: total abundance
+            data_wide = {
+                'Image ID': image_name,
+                f'{Cy5} total molecules': sum_spots_ch0,
+                f'{mCherry} total molecules': sum_spots_ch1,
+            }
+            df_quantification = pd.DataFrame([data_wide])
+            quantification_output = os.path.join(output_directory, f'total_mRNA_counts_{image_name}.csv')
+            df_quantification.to_csv(quantification_output, index=False)
+            print(f"Total abundance CSV saved at {quantification_output}")
+
+            # Long format per-cell quantification
+            if run_cell_classifier and features_df is not None:
+                num_cells = max(
+                    len(list_spots_in_each_cell_ch0) if list_spots_in_each_cell_ch0 is not None else 0,
+                    len(list_spots_in_each_cell_ch1) if list_spots_in_each_cell_ch1 is not None else 0
+                )
+                rows_long = []
+                for i in range(num_cells):
+                    label_type = features_df.at[i, "highest_confidence_label"]
+                    confidence = features_df.at[i, "prediction_confidence"]
+                    row = {
+                        'Image ID': image_name,
+                        f'{Cy5}': list_spots_in_each_cell_ch0[i] if list_spots_in_each_cell_ch0 is not None and i < len(list_spots_in_each_cell_ch0) else 0,
+                        f'{mCherry}': list_spots_in_each_cell_ch1[i] if list_spots_in_each_cell_ch1 is not None and i < len(list_spots_in_each_cell_ch1) else 0,
+                        'label': label_type,
+                        'confidence': round(confidence, 3)
+                    }
+                    rows_long.append(row)
+                
+                df_long = pd.DataFrame(rows_long)
+                
+                # Write both file formats to guarantee compatibility with all external scripts
+                long_output_path1 = os.path.join(output_directory, f'per_cell_mRNA_counts_{image_name}.csv')
+                long_output_path2 = os.path.join(output_directory, f'quantification_cell_{image_name}.csv')
+                df_long.to_csv(long_output_path1, index=False)
+                df_long.to_csv(long_output_path2, index=False)
+                print(f"Per-cell abundance CSVs saved at {long_output_path1} and {long_output_path2}")
+
+    # 7. Spatial Analysis of mRNA
+    if masks_cytosol is not None:
+        if run_mRNA_heatmaps:
+            print("\nGenerating mRNA heatmaps...")
+            from matplotlib import pyplot as plt
+            import matplotlib.patches as patches
+            
+            # Helper to create heatmaps (local inline implementation)
+            def create_local_heatmap(spots, max_proj, title, channel_name):
+                img_width, img_height = masks_cytosol.shape[1], masks_cytosol.shape[0]
+                cell_w = img_width / grid_width
+                cell_h = img_height / grid_height
+                grid = np.zeros((grid_height, grid_width), dtype=int)
+                
+                if spots is not None:
+                    for spot in spots:
+                        z, y, x = spot[:3]
+                        cell_x = int(x / cell_w)
+                        cell_y = int(y / cell_h)
+                        if 0 <= cell_x < grid_width and 0 <= cell_y < grid_height:
+                            grid[cell_y, cell_x] += 1
+                
+                fig, axs = plt.subplots(1, 2, figsize=(8, 4))
+                axs[0].imshow(max_proj, cmap='gray')
+                axs[0].set_title(f"{channel_name} Max Projection")
+                axs[0].axis('off')
+                
+                im = axs[1].imshow(grid, cmap='hot', interpolation='nearest')
+                axs[1].set_title(f"{channel_name} Heatmap")
+                fig.colorbar(im, ax=axs[1], shrink=0.7)
+                axs[1].axis('off')
+                
+                plt.tight_layout()
+                heatmap_path = os.path.join(output_directory, f'{channel_name}_heatmap_{image_name}.png')
+                plt.savefig(heatmap_path, dpi=300, bbox_inches='tight')
+                plt.close()
+
+            if image_Cy5 is not None:
+                create_local_heatmap(spots_post_clustering_ch0, image_Cy5, "Cy5 Heatmap", Cy5)
+            if image_mCherry is not None:
+                create_local_heatmap(spots_post_clustering_ch1, image_mCherry, "mCherry Heatmap", mCherry)
+
+        if run_rna_density_analysis:
+            print("\nGenerating RNA density profiles along AP axis...")
+            if image_Cy5 is not None:
+                analyze_rna_density(image_Cy5, masks_cytosol, 'PiYG', Cy5, image_name, output_directory)
+            if image_mCherry is not None:
+                analyze_rna_density(image_mCherry, masks_cytosol, 'PiYG', mCherry, image_name, output_directory)
+
+        if run_line_scan_analysis:
+            print("\nGenerating Line Scan intensity profiles...")
+            rna_names = [Cy5, mCherry]
+            rna_images = [image_Cy5, image_mCherry]
+            colormap_list = ['PiYG', 'PiYG']
+            
+            for m_name, img, cmap in zip(rna_names, rna_images, colormap_list):
+                if img is not None:
+                    # Retrieve df_long from locals safely if it exists
+                    l_df = locals().get('df_long', None)
+                    line_scan(img, masks_cytosol, cmap, m_name, image_name, output_directory,
+                              run_cell_classifier=run_cell_classifier, features_df=features_df, df_long=l_df)
+
+    # 8. Export PDF Report
+    print("\nExporting final PDF data report...")
+    output_pdf_path = os.path.join(output_directory, "report.pdf")
+
+    # Collect images and CSVs sorted by creation time
+    output_file_paths = []
+    for filename in os.listdir(output_directory):
+        if filename.lower().endswith((".png", ".csv")):
+            output_file_paths.append(os.path.join(output_directory, filename))
+    sorted_files = sorted(output_file_paths, key=lambda f: os.path.getctime(f))
+
+    c = canvas.Canvas(output_pdf_path, pagesize=letter)
+    c.setFont("Times-Roman", 16)
+    c.drawString(32, 728, f"{image_name}")
+    c.setFont("Times-Roman", 14)
+    c.drawString(32, 713, f"Report Generated: {datetime.now().date()}")
+
+    # Draw table function from CSV
+    def draw_csv_table(file_path, canv, margin, current_y, padding):
+        with open(file_path, newline="") as csvFile:
+            reader = csv.reader(csvFile)
+            data = list(reader)
+        
+        # Format values to 3 decimal places for floating points
+        formatted_data = []
+        for row in data:
+            formatted_row = []
+            for val in row:
+                try:
+                    formatted_row.append(f"{float(val):.3f}")
+                except ValueError:
+                    formatted_row.append(val)
+            formatted_data.append(formatted_row)
+
+        table = Table(formatted_data)
+        table.setStyle(TableStyle([
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("FONTNAME", (0, 0), (-1, 0), "Times-Roman"),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black)
+        ]))
+        tableWidth, tableHeight = table.wrapOn(canv, 400, 600)
+        current_y -= tableHeight + padding
+        table.drawOn(canv, margin, current_y)
+        return current_y
+
+    def get_image_size(file_path):
+        with Image.open(file_path) as img:
+            w, h = img.size
+            aspect = w / h
+        width = 145.6 * aspect
+        if width > 548:
+            height = 548 / aspect
+            width = 548
+        else:
+            height = 145.6
+        return height, width
+
+    def draw_page_number(canv):
+        canv.setFont("Times-Roman", 10)
+        canv.drawRightString(580, 32, f"{canv.getPageNumber()}")
+
+    current_y = 700
+    padding = 20
+    
+    for file_path in sorted_files:
+        if file_path.endswith(".png"):
+            h, w = get_image_size(file_path)
+            title = os.path.basename(file_path)
+            if current_y >= h + padding + 15:
+                c.setFont("Times-Roman", 12)
+                c.drawString(32, current_y - 15, title)
+                c.drawImage(file_path, 32, current_y - h - padding, w, h)
+                current_y -= h + padding + 10
+            else:
+                c.showPage()
+                c.setFont("Times-Roman", 16)
+                c.drawString(32, 728, f"{image_name}")
+                current_y = 710
+                c.setFont("Times-Roman", 12)
+                c.drawString(32, current_y, title)
+                c.drawImage(file_path, 32, current_y - h - padding, w, h)
+                current_y -= h + padding + 20
+                draw_page_number(c)
+        elif file_path.endswith(".csv"):
+            c.setFont("Times-Roman", 12)
+            c.drawString(32, current_y - 15, os.path.basename(file_path))
+            current_y -= 15
+            current_y = draw_csv_table(file_path, c, 32, current_y, padding)
+
+    # Dynamically find the .out file (log) and write to report
+    out_file = None
+    for item in os.listdir(output_directory):
+        if item.lower().endswith(".out"):
+            out_file = os.path.join(output_directory, item)
+            break
+
+    if out_file and os.path.isfile(out_file):
+        with open(out_file, 'r') as f:
+            lines = f.readlines()
+
+        req_space = len(lines) * 12 + 40
+        if current_y < req_space:
+            c.showPage()
+            current_y = 720
+            c.setFont("Times-Roman", 16)
+            c.drawString(32, 728, f"{image_name}")
+
+        c.setFont("Times-Roman", 12)
+        c.drawString(32, current_y, os.path.basename(out_file))
+        current_y -= 16
+
+        text_data = c.beginText(32, current_y)
+        text_data.setFont("Times-Roman", 10)
+        for line in lines:
+            text_data.textLine(line.strip())
+        c.drawText(text_data)
+
+    c.save()
+    print("PDF report successfully generated.")
+    print("Pipeline run completed successfully.")
 
