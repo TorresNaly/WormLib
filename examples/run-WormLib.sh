@@ -9,6 +9,7 @@
 #SBATCH --output="logs/%j-report.out"  # Initially save in a default logs directory
 
 # Set the base directory and initialize paths
+shopt -s nullglob
 local_download_directory="$1"
 input_directory="${local_download_directory}/input"
 subdirectories=("$input_directory"/*)

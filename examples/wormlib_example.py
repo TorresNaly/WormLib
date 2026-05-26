@@ -28,9 +28,14 @@ from reportlab.platypus import Table, TableStyle
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 
-# Resolve src/ directory and add to path
+# Resolve src/ directory and add to path. Prefer the current working tree when
+# launched from the repo root, then fall back to this script's location.
 current_dir = Path().resolve()
-src_dir = next(parent / 'src' for parent in Path().absolute().parents if (parent / 'src').is_dir())
+script_dir = Path(__file__).resolve().parent
+search_roots = [current_dir, *current_dir.parents, script_dir, *script_dir.parents]
+src_dir = next((root / 'src' for root in search_roots if (root / 'src').is_dir()), None)
+if src_dir is None:
+    raise RuntimeError("Could not find the WormLib src directory.")
 sys.path.insert(0, str(src_dir))
 main_dir = Path(src_dir.parent)
 
@@ -131,6 +136,8 @@ grid_height = color_result.get('grid_height', 80) if color_result else 80
 masks_cytosol, masks_nuclei = None, None
 features_df = None
 df_long = None
+cell_stage = "no-nuclei"
+fallback_to_embryo = False
 
 if run_cell_segmentation and bf is not None and image_nuclei is not None:
     image_cytosol = bf
@@ -150,13 +157,16 @@ if run_cell_segmentation and bf is not None and image_nuclei is not None:
 
     # Run classifier
     if run_cell_classifier:
+        classifier_attempted = False
         if cell_stage == "2-cell":
+            classifier_attempted = True
             features_df = classify_2cell(
                 masks_cytosol=masks_cytosol, bf=bf,
                 image_name=image_name, output_directory=output_directory,
                 model_path=str(model_2cell_path), verbose=True,
             )
         elif cell_stage == "4-cell":
+            classifier_attempted = True
             features_df = classify_4cell(
                 masks_cytosol=masks_cytosol, bf=bf,
                 image_name=image_name, output_directory=output_directory,
@@ -164,13 +174,17 @@ if run_cell_segmentation and bf is not None and image_nuclei is not None:
             )
         else:
             print(f"Skipping classifier: Stage '{cell_stage}' is not supported.")
+            fallback_to_embryo = True
+
+        if classifier_attempted and features_df is None:
+            fallback_to_embryo = True
 
     # If classifier returned None (count mismatch or unsupported stage), disable downstream
     if features_df is None:
         run_cell_classifier = False
 
 # Fallback: whole-embryo segmentation
-if masks_cytosol is None and bf is not None and image_nuclei is not None:
+if (masks_cytosol is None or fallback_to_embryo) and bf is not None and image_nuclei is not None:
     print("Running fallback whole-embryo segmentation...")
     masks_cytosol, masks_nuclei, _, _ = embryo_segmentation(
         bf, image_nuclei, image_name, output_directory,

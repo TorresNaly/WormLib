@@ -2284,6 +2284,7 @@ if __name__ == "__main__":
     masks_cytosol, masks_nuclei = None, None
     cell_stage = "no-nuclei"
     features_df = None
+    fallback_to_embryo = False
 
     if run_cell_segmentation and bf is not None and image_nuclei is not None:
         print("\nRunning single-cell segmentation...")
@@ -2302,26 +2303,42 @@ if __name__ == "__main__":
 
             # Run classifier
             if run_cell_classifier:
+                classifier_attempted = False
                 if cell_stage == "2-cell" and model_2cell_path.exists():
                     print("Running 2-cell blatomere classifier...")
+                    classifier_attempted = True
                     features_df = classify_2cell(masks_cytosol, bf, image_name, output_directory, model_path=str(model_2cell_path), verbose=True)
                 elif cell_stage == "4-cell" and model_4cell_path.exists():
                     print("Running 4-cell blastomere classifier...")
+                    classifier_attempted = True
                     features_df = classify_4cell(masks_cytosol, bf, image_name, output_directory, model_path=str(model_4cell_path), verbose=True)
                 else:
                     print(f"Skipping classifier: Stage '{cell_stage}' is not supported or models are missing.")
+                    fallback_to_embryo = True
+
+                if classifier_attempted and features_df is None:
+                    fallback_to_embryo = True
+
+                if features_df is None:
+                    run_cell_classifier = False
         except Exception as e:
             print(f"⚠️ Cell segmentation failed ({e}). Falling back to whole-embryo segmentation.")
             cell_stage = "no-nuclei"
+            fallback_to_embryo = True
+            masks_cytosol = None
 
     # Fallback to embryo segmentation if cell stage couldn't be determined or cell segmentation was skipped
-    if cell_stage == "no-nuclei" or masks_cytosol is None:
-        if run_embryo_segmentation and bf is not None:
+    if cell_stage == "no-nuclei" or masks_cytosol is None or fallback_to_embryo:
+        if (run_embryo_segmentation or fallback_to_embryo) and bf is not None and image_nuclei is not None:
             print("\nRunning fallback whole-embryo segmentation...")
             masks_cytosol, masks_nuclei, _, _ = embryo_segmentation(
                 bf, image_nuclei, image_name, output_directory,
                 embryo_diameter=embryo_diameter, nuclei_diameter=nuclei_diameter)
+            run_cell_classifier = False
+            features_df = None
         else:
+            if fallback_to_embryo:
+                masks_cytosol = None
             print("Skipping segmentation.")
 
     # 5. Spot Detection
@@ -2577,4 +2594,3 @@ if __name__ == "__main__":
     c.save()
     print("PDF report successfully generated.")
     print("Pipeline run completed successfully.")
-
