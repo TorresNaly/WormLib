@@ -8,9 +8,7 @@
 
 **WormLib** is a modular open-source image analysis library for quantifying microscopy images of *Caenorhabditis elegans* embryos. It provides an end-to-end pipeline from image loading, embryo segmentation, cell identity prediction, single-molecule FISH (smFISH) spot detection, and spatial mRNA analysis.
 
-<p align="center">
-  <img src="docs/WormLib_logo.png" alt="WormLib" width="300" />
-</p>
+
 
 ---
 
