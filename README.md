@@ -22,19 +22,36 @@
 
 
 - **Cell segmentation**: Custom-trained model for segmentation of 2- & 4-cell embryos. Separates each cell from another and the background using diameter optimization (only for use in images of ≤4-cell embryos)
+
+![Alt text](examples/04_example-output/N2-erm-1_set-3/12/segmentation_240628_N2_erm-1_set-3_12.png)
+
 - **Cell classification**: Custom-trained Random Forest classifiers for blastomere identity prediction
   - **2-cell stage**: AB vs P1 with proximity fail-safe
   - **4-cell stage**: ABa, ABp, EMS, P2 with ellipse-based positional assignment
 
 - **Embryo segmentation**: Cellpose "cyto" based whole-embryo segmentation with size-outlier filtering
+
+![Alt text](examples/04_example-output/N2-erm-1_set-3/12/segmentation_240628_N2_erm-1_set-3_12.png)
+
 - **Nuclear-only segmentation**: Automatic fallback when no brightfield/reference image is available
 - **Graceful fallback chain**: Cell segmentation → whole-embryo segmentation → nuclear-only segmentation → whole-image mask
 
+
+
 - **smFISH spot detection**: BigFISH based spot detection with with LoG filtering, automated thresholding, and dense region decomposition
+
+![Alt text](examples/04_example-output/N2-erm-1_set-3/12/erm-1_mRNA_detection_240628_N2_erm-1_set-3_12.png)
+
+![Alt text](examples/04_example-output/N2-erm-1_set-3/12/erm-1_mRNA_threshold_240628_N2_erm-1_set-3_12.png)
+
+
 - **Cluster detection**: Identify transcription sites and mRNA clusters
 - **Per-cell / per-region quantification**: Spot counting per segmented cell (with classifier labels) or per segmentation region
+
+
 - **Spatial mRNA analysis**:
   - Grid-based mRNA abundance heatmaps
+  ![Alt text](examples/04_example-output/N2-erm-1_set-3/12/erm-1_mRNA_heatmap.png)
   - RNA density profiles along the anterior-posterior axis
   - Line scan intensity analysis with ROI restriction
 - **PDF report generation**: Automated reports with figures, tables, and analysis logs
