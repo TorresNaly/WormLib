@@ -18,6 +18,9 @@
 - **Image I/O**: Load DeltaVision (.dv), Nikon (.nd2), and TIFF images with multi-channel extraction
 - **N-channel support**: Analyze any number of channels
 
+![Alt text](examples/04_example-output/N2-erm-1_set-3/12/colors_240628_N2_erm-1_set-3_12.png)
+
+
 - **Cell segmentation**: Custom-trained model for segmentation of 2- & 4-cell embryos. Separates each cell from another and the background using diameter optimization (only for use in images of ≤4-cell embryos)
 - **Cell classification**: Custom-trained Random Forest classifiers for blastomere identity prediction
   - **2-cell stage**: AB vs P1 with proximity fail-safe
