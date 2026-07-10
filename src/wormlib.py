@@ -340,13 +340,13 @@ def load_images(image_path, output_directory, channel_names, slice_to_plot=0, ch
         image_type = 'dv'
         # For DeltaVision, intelligently order files (ref first, then colors)
         dv_files = _organize_dv_files(dv_files)
-        print("Detected DeltaVision (.dv) images")
+        print("Detected file type: DeltaVision (.dv)")
     elif nd2_files:
         image_type = 'nd2'
-        print("Detected Nikon (.nd2) images")
+        print("Detected file type: Nikon (.nd2)")
     elif tiff_files:
         image_type = 'tiff'
-        print("Detected TIFF (.tif/.tiff) images")
+        print("Detected file type: TIFF (.tif/.tiff)")
     else:
         print("No supported image format found (.dv, .nd2, .tif, .tiff)")
         return None
@@ -382,12 +382,10 @@ def load_images(image_path, output_directory, channel_names, slice_to_plot=0, ch
         else:
             image_name = dv_filename.replace(".dv", "")
         
-        print(f'Image ID: {image_name}\n')
-        
         # Process all loaded image stacks
         for img_idx, img_stack in enumerate(list_images):
             image_stack = img_stack.astype(np.uint16)
-            print(f'Processing file {dv_files[img_idx]} with shape: {image_stack.shape}')
+            print(f'Processing image file {dv_files[img_idx]} with shape: {image_stack.shape}')
             
             # === KEY FIX: Check dimensions FIRST, then assign based on what's requested ===
             if image_stack.ndim == 2:
