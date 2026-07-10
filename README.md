@@ -1,58 +1,34 @@
 # WormLib <img src="docs/WormLib_logo.png" alt="WormLib Logo" width="150" align="right" />
 
-**Authors:** Naly Torres, Luis de Lira Aguilera, Sam Savislan Pullaro, Karissa Coleman, Richard Bruno, Brian Munsky, Erin Osborne Nishimura 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/) [![BigFISH](https://img.shields.io/badge/smFISH-BigFISH-orange.svg)](https://github.com/fish-quant/big-fish) [![Cellpose](https://img.shields.io/badge/segmentation-Cellpose-green.svg)](https://github.com/MouseLand/cellpose)
 
-## About
+**WormLib is a modular open-source image analysis library for quantifying microscopy images of *Caenorhabditis elegans* embryos. It provides an end-to-end pipeline from image loading, embryo segmentation, cell identity prediction, single-molecule FISH (smFISH) spot detection, and spatial mRNA analysis.**
 
-**WormLib** is a modular open-source image analysis library for quantifying microscopy images of *Caenorhabditis elegans* embryos. It provides an end-to-end pipeline from image loading, embryo segmentation, cell identity prediction, single-molecule FISH (smFISH) spot detection, and spatial mRNA analysis.
-
-
+Authors: Naly Torres, Luis de Lira Aguilera, Sam Savislan Pullaro, Karissa Coleman, Richard Bruno, Brian Munsky, Erin Osborne Nishimura
 
 ---
 
 ## Features
 
-- **User input**: Describe channels, microscope parameters, and pipeline steps in a single YAML file
-- **Image I/O**: Load DeltaVision (.dv), Nikon (.nd2), and TIFF images with multi-channel extraction
-- **N-channel support**: Analyze any number of channels
+- **User input**: Describe any number of channels, microscope parameters, and pipeline steps in a single YAML file
+- **Supported image file**: DeltaVision (.dv), Nikon (.nd2), and TIFF images with multi-channel extraction
 
-![Alt text](examples/04_example-output/N2-erm-1_set-3/12/colors_240628_N2_erm-1_set-3_12.png)
-
-
-- **Cell segmentation**: Custom-trained model for segmentation of 2- & 4-cell embryos. Separates each cell from another and the background using diameter optimization (only for use in images of ≤4-cell embryos)
-
-![Alt text](examples/04_example-output/N2-erm-1_set-3/12/segmentation_240628_N2_erm-1_set-3_12.png)
-
-- **Cell classification**: Custom-trained Random Forest classifiers for blastomere identity prediction
+- **Cell segmentation and Classification of C. elegans embryos**: Custom-trained Cellpose models for segmentation of 2- & 4-cell embryos separates each cell from another and the background using diameter optimization (only for use in images of ≤4-cell embryos). Followed by custom-trained Random Forest classifiers for blastomere identity prediction
   - **2-cell stage**: AB vs P1 with proximity fail-safe
   - **4-cell stage**: ABa, ABp, EMS, P2 with ellipse-based positional assignment
 
 - **Embryo segmentation**: Cellpose "cyto" based whole-embryo segmentation with size-outlier filtering
 
-![Alt text](examples/04_example-output/N2-erm-1_set-3/12/segmentation_240628_N2_erm-1_set-3_12.png)
-
-- **Nuclear-only segmentation**: Automatic fallback when no brightfield/reference image is available
-- **Graceful fallback chain**: Cell segmentation → whole-embryo segmentation → nuclear-only segmentation → whole-image mask
-
-
 
 - **smFISH spot detection**: BigFISH based spot detection with with LoG filtering, automated thresholding, and dense region decomposition
-
-![Alt text](examples/04_example-output/N2-erm-1_set-3/12/erm-1_mRNA_detection_240628_N2_erm-1_set-3_12.png)
-
-![Alt text](examples/04_example-output/N2-erm-1_set-3/12/erm-1_mRNA_threshold_240628_N2_erm-1_set-3_12.png)
-
-
-- **Cluster detection**: Identify transcription sites and mRNA clusters
 - **Per-cell / per-region quantification**: Spot counting per segmented cell (with classifier labels) or per segmentation region
 
 
 - **Spatial mRNA analysis**:
   - Grid-based mRNA abundance heatmaps
-  ![Alt text](examples/04_example-output/N2-erm-1_set-3/12/erm-1_mRNA_heatmap.png)
   - RNA density profiles along the anterior-posterior axis
+  - Cluster detection: Identify transcription sites and mRNA clusters
   - Line scan intensity analysis with ROI restriction
 - **PDF report generation**: Automated reports with figures, tables, and analysis logs
 - **HPC batch processing**: SLURM array job support for high-throughput analysis
