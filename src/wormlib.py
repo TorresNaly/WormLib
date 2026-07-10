@@ -2027,6 +2027,81 @@ def line_scan(image, masks_cytosol, colormap, mRNA_name, image_name, output_dire
         print(f"No contours found in the mask for {mRNA_name}.")
 
 
+def save_spot_quantification(spot_counts_dict, image_name, output_directory, 
+                             features_df=None, run_cell_classifier=False):
+    """
+    Save mRNA spot quantification to CSV files (total and per-cell/region counts).
+    
+    Parameters:
+    -----------
+    spot_counts_dict : dict
+        Dictionary mapping channel names to list of spot counts per cell/region.
+        Example: {'set3_mRNA': [10, 20, 15], 'erm1_mRNA': [30, 25, 28]}
+    image_name : str
+        Name of the image for output filenames
+    output_directory : str or Path
+        Directory to save CSV files
+    features_df : pd.DataFrame, optional
+        DataFrame with cell classification results (has 'highest_confidence_label' and 'prediction_confidence' columns)
+    run_cell_classifier : bool, optional
+        Whether cell classifier was run (affects output filename prefix)
+    
+    Returns:
+    --------
+    tuple : (df_quantification, df_long)
+        DataFrames for total and per-cell/region counts
+    """
+    if not spot_counts_dict or all(not counts for counts in spot_counts_dict.values()):
+        print("No spot counts to quantify.")
+        return None, None
+    
+    output_directory = str(output_directory)
+    
+    # Wide format: total abundance
+    data_wide = {'Image ID': image_name}
+    for channel_name, counts in spot_counts_dict.items():
+        if counts:
+            data_wide[f"{channel_name} total molecules"] = sum(counts)
+    
+    df_quantification = pd.DataFrame([data_wide])
+    quantification_output = os.path.join(output_directory, f'total_mRNA_counts_{image_name}.csv')
+    df_quantification.to_csv(quantification_output, index=False)
+    print(f"Total mRNA counts saved to {quantification_output}")
+    print(df_quantification)
+    
+    # Long format: per-cell/region counts
+    num_regions = max((len(counts) for counts in spot_counts_dict.values() if counts), default=0)
+    
+    if num_regions > 0:
+        rows_long = []
+        for i in range(num_regions):
+            row = {'Image ID': image_name, 'region_id': i + 1}
+            
+            # Add spot counts for each channel
+            for channel_name, counts in spot_counts_dict.items():
+                row[channel_name] = counts[i] if i < len(counts) else 0
+            
+            # Add classification info if available
+            if features_df is not None and run_cell_classifier:
+                row['label'] = features_df.at[i, "highest_confidence_label"]
+                row['confidence'] = round(features_df.at[i, "prediction_confidence"], 3)
+            
+            rows_long.append(row)
+        
+        df_long = pd.DataFrame(rows_long)
+        
+        # Save with appropriate prefix
+        output_prefix = "per_cell" if run_cell_classifier and features_df is not None else "per_region"
+        long_output = os.path.join(output_directory, f'{output_prefix}_mRNA_counts_{image_name}.csv')
+        df_long.to_csv(long_output, index=False)
+        print(f"\n{output_prefix.title()} mRNA counts saved to {long_output}")
+        print(df_long)
+        
+        return df_quantification, df_long
+    
+    return df_quantification, None
+
+
 def create_local_heatmap(spots, max_proj, channel_name, masks_cytosol, grid_width, grid_height, 
                          image_name, output_directory, vmin=0, vmax=None):
     """
