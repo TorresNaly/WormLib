@@ -340,13 +340,13 @@ def load_images(image_path, output_directory, channel_names, slice_to_plot=0, ch
         image_type = 'dv'
         # For DeltaVision, intelligently order files (ref first, then colors)
         dv_files = _organize_dv_files(dv_files)
-        print("Detected file type: DeltaVision (.dv)")
+        print("Detected DeltaVision (.dv) images")
     elif nd2_files:
         image_type = 'nd2'
-        print("Detected file type: Nikon (.nd2)")
+        print("Detected Nikon (.nd2) images")
     elif tiff_files:
         image_type = 'tiff'
-        print("Detected file type: TIFF (.tif/.tiff)")
+        print("Detected TIFF (.tif/.tiff) images")
     else:
         print("No supported image format found (.dv, .nd2, .tif, .tiff)")
         return None
@@ -382,10 +382,12 @@ def load_images(image_path, output_directory, channel_names, slice_to_plot=0, ch
         else:
             image_name = dv_filename.replace(".dv", "")
         
+        print(f'Image ID: {image_name}\n')
+        
         # Process all loaded image stacks
         for img_idx, img_stack in enumerate(list_images):
             image_stack = img_stack.astype(np.uint16)
-            print(f'Processing image file {dv_files[img_idx]} with shape: {image_stack.shape}')
+            print(f'Processing file {dv_files[img_idx]} with shape: {image_stack.shape}')
             
             # === KEY FIX: Check dimensions FIRST, then assign based on what's requested ===
             if image_stack.ndim == 2:
@@ -1013,367 +1015,9 @@ except ImportError:
 warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
 
 
-# run_2cell_classifier = False
-# run_4cell_classifier = False
-
-# if run_2cell_classifier:
-#     # --- Extract features of unseen brightfield image for classification ---
-#     props_unseen = regionprops_table(
-#         masks_cytosol,
-#         intensity_image=bf,
-#         properties=[
-#             'label', 'area', 'perimeter', 'eccentricity', 'solidity', 'extent',
-#             'major_axis_length', 'minor_axis_length', 'mean_intensity',
-#             'bbox', 'centroid', 'orientation'
-#         ]
-#     )
-
-#     # Convert to DataFrame
-#     features_df = pd.DataFrame(props_unseen)
-
-#     # Rename centroids for convenience
-#     features_df['centroid_y'] = features_df['centroid-0']
-#     features_df['centroid_x'] = features_df['centroid-1']
-
-#     # Load trained Random Forest model
-#     rf = joblib.load("models/2-cell_classification_RFmodel.joblib")
-
-#     # --- Select the features used during training ---
-#     X_new = features_df[
-#         [
-#             'area', 'perimeter', 'eccentricity', 'solidity', 'extent',
-#             'major_axis_length', 'minor_axis_length', 'mean_intensity',
-#             'bbox-0', 'bbox-1', 'bbox-2', 'bbox-3',
-#             'centroid-0', 'centroid-1',
-#             'orientation'
-#         ]
-#     ]
-
-#     # --- Predict cell type and probabilities ---
-#     predictions = rf.predict(X_new)
-#     proba = rf.predict_proba(X_new)
-#     classes = rf.classes_
-
-#     # --- Get confidence scores ---
-#     predicted_class_indices = [list(classes).index(pred) for pred in predictions]
-#     prediction_confidence = [proba[i][idx] for i, idx in enumerate(predicted_class_indices)]
-
-#     # Add predictions and confidence to dataframe
-#     features_df["initial_prediction"] = predictions
-#     features_df["prediction_confidence"] = prediction_confidence
-    
-#     # --- Fit ellipse to entire embryo ---
-#     binary_image = (masks_cytosol > 0).astype(np.uint8)
-#     contours = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-
-#     if contours and len(contours[0]) >= 5:
-#         cnt = max(contours, key=cv2.contourArea)
-#         ellipse = cv2.fitEllipse(cnt)
-#         (xc, yc), (d1, d2), angle = ellipse  # center, axes, rotation
-#         theta = np.deg2rad(angle)
-#         minor_axis_vec = np.array([-np.sin(theta), np.cos(theta)])  # along minor axis
-
-#         # Compute relative minor-axis positions for each cell
-#         rel_positions = []
-#         for _, row in features_df.iterrows():
-#             centroid = np.array([row['centroid_x'], row['centroid_y']])
-#             vec_from_center = centroid - np.array([xc, yc])
-#             rel_pos_minor = np.dot(vec_from_center, minor_axis_vec) / d2  # normalized
-#             rel_positions.append(rel_pos_minor)
-#         features_df['rel_pos_minor'] = rel_positions
-
-#     # ---- Fail-safe logic: Ensure exactly one AB and one P1 ----
-#     ab_idx = list(classes).index("AB")
-#     p1_idx = list(classes).index("P1")
-
-#     # Rank cells by their AB and P1 confidence
-#     features_df["AB_conf"] = proba[:, ab_idx]
-#     features_df["P1_conf"] = proba[:, p1_idx]
-
-#     # Assign highest AB_conf as AB, highest P1_conf as P1
-#     ab_row = features_df.loc[features_df["AB_conf"].idxmax()]
-#     p1_row = features_df.loc[features_df["P1_conf"].idxmax()]
-
-#     # Assign labels
-#     features_df["highest_confidence_label"] = "Unassigned"
-#     features_df.loc[ab_row.name, "highest_confidence_label"] = "AB"
-#     features_df.loc[p1_row.name, "highest_confidence_label"] = "P1"
-    
-#     # --- Extract AB and P1 masks ---
-#     ab_mask = (masks_cytosol == ab_row['label'])
-#     p1_mask = (masks_cytosol == p1_row['label'])
-
-#     # Dilate slightly to ensure boundary contact detection
-#     ab_dilated = binary_dilation(ab_mask, iterations=1)
-#     p1_dilated = binary_dilation(p1_mask, iterations=1)
-
-#     touching = np.any(ab_dilated & p1_mask) or np.any(p1_dilated & ab_mask)
-
-#     if not touching:
-#         print(f"Fail-safe triggered for {image_name}: AB and P1 are not touching.")
-#         features_df.loc[ab_row.name, "highest_confidence_label"] = "Unassigned"
-#         features_df.loc[p1_row.name, "highest_confidence_label"] = "Unassigned"
-#         features_df["nearby_cells"] = False
-#     else:
-#         features_df["nearby_cells"] = True
-
-#     # --- Plot prediction labels ---
-#     mask_image = np.max(masks_cytosol, axis=0) if masks_cytosol.ndim == 3 else masks_cytosol
-#     plt.figure(figsize=(6, 6))
-#     plt.imshow(mask_image, cmap='nipy_spectral')
-#     plt.axis('off')
-
-#     for _, row in features_df.iterrows():
-#         label = row['label']
-#         pred_label = row['highest_confidence_label']
-#         y, x = center_of_mass(mask_image == label)
-#         plt.text(x, y, pred_label, color='white', fontsize=16,
-#                  ha='center', va='center', weight='bold')
-
-#     plt.title("Predicted Labels on Cytosol Masks")
-#     predicted_label_filename = os.path.join(output_directory, f'predicted_label_{image_name}.png')
-#     plt.savefig(predicted_label_filename, dpi=300, bbox_inches='tight')
-#     plt.show()
-
-#     # --- Save outputs ---
-#     features_df_output = os.path.join(output_directory, f'features_df_{image_name}.csv')
-#     features_df.to_csv(features_df_output, index=False)
-
-#     print(features_df.tail())
-    
-#     # --- Plot cell centroid position ---
-#     plt.figure(figsize=(6,6))
-#     for label, group in features_df.groupby('highest_confidence_label'):
-#         plt.scatter(group['centroid_x'], group['centroid_y'], 
-#                     s=group['area']/100, label=label)
-
-#     plt.gca().invert_yaxis()  # Match image coordinates
-#     plt.xlabel("X position")
-#     plt.ylabel("Y position")
-#     plt.title("Cell positions and sizes")
-
-#     # Move legend outside the plot
-#     plt.legend(title="Cell Type", loc='center left', bbox_to_anchor=(1, 0.7))
-
-#     # Save figure
-#     centroid_position_plot_filename = os.path.join(output_directory, f'centroid_position_plot_{image_name}.png')
-#     plt.savefig(centroid_position_plot_filename, dpi=300, bbox_inches='tight')
-#     plt.show()
-#     # --- Plot prediction confidence ---
-#     conf_cols = ['AB_conf', 'P1_conf']
-#     conf_df = features_df.melt(id_vars='label', value_vars=conf_cols,
-#                                var_name='class', value_name='confidence')
-#     conf_df['class'] = conf_df['class'].str.replace('_conf','')
-
-#     plt.figure(figsize=(8,4))
-#     sns.barplot(data=conf_df, x='label', y='confidence', hue='class')
-#     plt.ylabel("Classifier Confidence")
-#     plt.xlabel("Cell Mask Label")
-#     plt.title("Confidence Scores per Cell and Class")
-#     plt.legend(title="Class")
-#     cell_confidence_plot_filename = os.path.join(output_directory, f'cell_confidence_plot_{image_name}.png')
-#     plt.savefig(cell_confidence_plot_filename, dpi=300, bbox_inches='tight')
-#     plt.show()
-# else:
-#     print("Skipping 2-cell classifier...")
 
 
-
-
-
-
-# ### 4-cell classifier
-
-# # Suppress just the InconsistentVersionWarning
-# warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
-
-# if run_4cell_classifier:
-#     # --- Extract base features ---
-#     props_unseen = regionprops_table(
-#         masks_cytosol,
-#         intensity_image=bf,
-#         properties=[
-#             'label', 'area', 'perimeter', 'eccentricity', 'solidity', 'extent',
-#             'major_axis_length', 'minor_axis_length', 'mean_intensity',
-#             'bbox', 'centroid', 'orientation'
-#         ]
-#     )
-#     features_df = pd.DataFrame(props_unseen)
-#     # --- define centroid_x / centroid_y ---
-#     features_df['centroid_y'] = features_df['centroid-0']
-#     features_df['centroid_x'] = features_df['centroid-1']
-
-#     # --- Apply filters once to whole BF image ---
-#     bf_float = img_as_float(bf)
-#     smooth = filters.gaussian(bf_float, sigma=1)
-#     sobel_edges = filters.sobel(smooth)
-#     median_filtered = filters.rank.median(
-#         (bf / bf.max() * 255).astype(np.uint8),
-#         disk(3)
-#     )
-
-#     # --- Add per-cell filtered stats ---
-#     extra_features = []
-#     for lbl in features_df['label']:
-#         mask = (masks_cytosol == lbl)
-#         extra_features.append({
-#             "smooth_mean": np.mean(smooth[mask]),
-#             "smooth_std": np.std(smooth[mask]),
-#             "smooth_median": np.median(smooth[mask]),
-#             "sobel_mean": np.mean(sobel_edges[mask]),
-#             "sobel_std": np.std(sobel_edges[mask]),
-#             "sobel_median": np.median(sobel_edges[mask]),
-#             "medianf_mean": np.mean(median_filtered[mask]),
-#             "medianf_std": np.std(median_filtered[mask]),
-#             "medianf_median": np.median(median_filtered[mask])
-#         })
-#     extra_df = pd.DataFrame(extra_features)
-#     features_df = pd.concat([features_df, extra_df], axis=1)
-
-#     # --- Load model ---
-#     rf = joblib.load("models/4-cell_classification_RFmodel.joblib")
-
-#     # --- Match training feature order ---
-#     X_new = features_df[
-#         [
-#             'area', 'perimeter', 'eccentricity', 'solidity', 'extent',
-#             'major_axis_length', 'minor_axis_length', 'mean_intensity',
-#             'bbox-0', 'bbox-1', 'bbox-2', 'bbox-3',
-#             'centroid-0', 'centroid-1',
-#             'orientation',
-#             'smooth_mean', 'smooth_std', 'smooth_median',
-#             'sobel_mean', 'sobel_std', 'sobel_median',
-#             'medianf_mean', 'medianf_std', 'medianf_median'
-#         ]
-#     ]
-
-#     # --- Predict ---
-#     proba = rf.predict_proba(X_new)
-#     classes = rf.classes_
-#     initial_preds = rf.predict(X_new)
-
-#     # --- Confidence scores ---
-#     predicted_class_indices = [list(classes).index(pred) for pred in initial_preds]
-#     prediction_confidence = [proba[i][idx] for i, idx in enumerate(predicted_class_indices)]
-#     features_df["initial_prediction"] = initial_preds
-#     features_df["prediction_confidence"] = prediction_confidence
-
-#     # --- Confidence for each class ---
-#     for cname in ["ABa", "ABp", "EMS", "P2"]:
-#         features_df[f"{cname}_conf"] = proba[:, list(classes).index(cname)]
-
-#     # --- Fail-safe: ensure one label per class ---
-#     features_df["highest_confidence_label"] = "Unassigned"
-#     for cname in ["ABa", "ABp", "EMS", "P2"]:
-#         features_df.loc[features_df[f"{cname}_conf"].idxmax(), "highest_confidence_label"] = cname
-
-#     # --- Positional fail-safe using ellipse ---
-#     # Fit ellipse to entire embryo
-#     binary_image = (masks_cytosol > 0).astype(np.uint8)
-#     contours = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-
-#     if contours and len(contours[0]) >= 5:
-#         cnt = max(contours, key=cv2.contourArea)
-#         ellipse = cv2.fitEllipse(cnt)
-#         (xc, yc), (d1, d2), angle = ellipse  # center, axes, rotation
-#         theta = np.deg2rad(angle)
-#         minor_axis_vec = np.array([-np.sin(theta), np.cos(theta)])  # along minor axis
-
-#         # Compute relative minor-axis positions for each cell
-#         rel_positions = []
-#         for idx, row in features_df.iterrows():
-#             centroid = np.array([row['centroid_x'], row['centroid_y']])
-#             vec_from_center = centroid - np.array([xc, yc])
-#             rel_pos_minor = np.dot(vec_from_center, minor_axis_vec) / d2  # normalized
-#             rel_positions.append(rel_pos_minor)
-#         features_df['rel_pos_minor'] = rel_positions
-
-#         # Assign ABa / P2 at ends
-#         left_cell = features_df.loc[features_df['rel_pos_minor'].idxmin()]
-#         right_cell = features_df.loc[features_df['rel_pos_minor'].idxmax()]
-#         if left_cell['area'] > right_cell['area']:
-#             features_df.loc[left_cell.name, 'highest_confidence_label'] = 'ABa'
-#             features_df.loc[right_cell.name, 'highest_confidence_label'] = 'P2'
-#         else:
-#             features_df.loc[left_cell.name, 'highest_confidence_label'] = 'P2'
-#             features_df.loc[right_cell.name, 'highest_confidence_label'] = 'ABa'
-
-#         # Middle cells: EMS = smaller, ABp = larger
-#         middle_cells = features_df.drop([left_cell.name, right_cell.name])
-#         ems_cell = middle_cells.loc[middle_cells['area'].idxmin()]
-#         abp_cell = middle_cells.loc[middle_cells['area'].idxmax()]
-#         features_df.loc[ems_cell.name, 'highest_confidence_label'] = 'EMS'
-#         features_df.loc[abp_cell.name, 'highest_confidence_label'] = 'ABp'
-
-#     # --- Plot results ---
-#     mask_image = np.max(masks_cytosol, axis=0) if masks_cytosol.ndim == 3 else masks_cytosol
-#     plt.figure(figsize=(6, 6))
-#     plt.imshow(mask_image, cmap='nipy_spectral')
-#     plt.axis('off')
-
-#     for idx, row in features_df.iterrows():
-#         y, x = center_of_mass(mask_image == row['label'])
-#         plt.text(x, y, row['highest_confidence_label'], color='white',
-#                  fontsize=16, ha='center', va='center', weight='bold')
-
-#     plt.title("Predicted Labels on Cytosol Masks")
-
-#     # --- Save outputs ---
-#     features_df_output = os.path.join(output_directory, f'features_df_{image_name}.csv')
-#     features_df.to_csv(features_df_output, index=False)
-#     predicted_label_filename = os.path.join(output_directory, f'predicted_label_{image_name}.png')
-#     plt.savefig(predicted_label_filename, dpi=300, bbox_inches='tight')
-#     plt.show()
-
-#     print(features_df.tail())
-
-#    ## plot cell centroid position
-#     plt.figure(figsize=(6,6))
-#     for label, group in features_df.groupby('highest_confidence_label'):
-#         plt.scatter(group['centroid_x'], group['centroid_y'], 
-#                     s=group['area']/50, label=label)
-
-#     plt.gca().invert_yaxis()  # Match image coordinates
-#     plt.xlabel("X position")
-#     plt.ylabel("Y position")
-#     plt.legend()
-#     plt.title("Cell positions and sizes")
-#     plt.show()
-    
-#     # Save the figure
-#     centroid_position_plot_filename = os.path.join(output_directory, f'centroid_position_plot_{image_name}.png')
-#     plt.savefig(centroid_position_plot_filename, dpi=300, bbox_inches='tight')
-#     plt.show()
-
-
-
-#     ### plot prediction confidence per cell
-#     # Reshape dataframe for plotting
-#     conf_cols = ['ABa_conf', 'ABp_conf', 'EMS_conf', 'P2_conf']
-#     conf_df = features_df.melt(id_vars='label', value_vars=conf_cols,
-#                                var_name='class', value_name='confidence')
-
-#     # Strip "_conf" from class names
-#     conf_df['class'] = conf_df['class'].str.replace('_conf','')
-
-#     plt.figure(figsize=(8,4))
-#     sns.barplot(data=conf_df, x='label', y='confidence', hue='class')
-#     plt.ylabel("Classifier Confidence")
-#     plt.xlabel("Cell Mask Label")
-#     plt.title("Confidence Scores per Cell and Class")
-#     plt.legend(title="Class")
-#     plt.show()
-    
-#     # Save the figure
-#     cell_confidence_plot_filename = os.path.join(output_directory, f'cell_confidence_plot_{image_name}.png')
-#     plt.savefig(cell_confidence_plot_filename, dpi=300, bbox_inches='tight')
-#     plt.show()
-
-# else:
-#     print("Skipping 4-cell classifier...")
-
-
-
+# 2-cell classification using Random Forest
 
 def classify_2cell(masks_cytosol, bf, image_name, output_directory, 
                    model_path="models/2-cell_classification_RFmodel.joblib", 
@@ -1417,7 +1061,7 @@ def classify_2cell(masks_cytosol, bf, image_name, output_directory,
     features_df = pd.DataFrame(props_unseen)
 
     if len(features_df) != 2:
-        print(f"⚠️ classify_2cell: Expected 2 cytosol masks, got {len(features_df)}. Skipping classification.")
+        print(f" classify_2cell: Expected 2 cytosol masks, got {len(features_df)}. Skipping classification.")
         return None
 
     # Rename centroids for convenience
@@ -1575,237 +1219,7 @@ def classify_2cell(masks_cytosol, bf, image_name, output_directory,
 
 
 
-
-
-# def classify_4cell(masks_cytosol, bf, image_name, output_directory,
-#                    model_path="models/4-cell_classification_RFmodel.joblib",
-#                    verbose=True):
-#     """
-#     Classify 4-cell embryo into ABa, ABp, EMS, and P2 cells using Random Forest classifier.
-    
-#     Parameters:
-#     -----------
-#     masks_cytosol : ndarray
-#         Cytosol segmentation masks
-#     bf : ndarray
-#         Brightfield image
-#     image_name : str
-#         Image identifier for saving outputs
-#     output_directory : str or Path
-#         Directory to save output files
-#     model_path : str
-#         Path to trained Random Forest model (default: "models/4-cell_classification_RFmodel.joblib")
-#     verbose : bool
-#         Whether to print statements and show plots (default: True)
-    
-#     Returns:
-#     --------
-#     features_df : pd.DataFrame
-#         DataFrame with cell features, predictions, and confidence scores
-#     """
-    
-#     # --- Extract base features ---
-#     props_unseen = regionprops_table(
-#         masks_cytosol,
-#         intensity_image=bf,
-#         properties=[
-#             'label', 'area', 'perimeter', 'eccentricity', 'solidity', 'extent',
-#             'major_axis_length', 'minor_axis_length', 'mean_intensity',
-#             'bbox', 'centroid', 'orientation'
-#         ]
-#     )
-#     features_df = pd.DataFrame(props_unseen)
-    
-#     # --- define centroid_x / centroid_y ---
-#     features_df['centroid_y'] = features_df['centroid-0']
-#     features_df['centroid_x'] = features_df['centroid-1']
-
-#     # --- Apply filters once to whole BF image ---
-#     bf_float = img_as_float(bf)
-#     smooth = filters.gaussian(bf_float, sigma=1)
-#     sobel_edges = filters.sobel(smooth)
-#     median_filtered = filters.rank.median(
-#         (bf / bf.max() * 255).astype(np.uint8),
-#         disk(3)
-#     )
-
-#     # --- Add per-cell filtered stats ---
-#     extra_features = []
-#     for lbl in features_df['label']:
-#         mask = (masks_cytosol == lbl)
-#         extra_features.append({
-#             "smooth_mean": np.mean(smooth[mask]),
-#             "smooth_std": np.std(smooth[mask]),
-#             "smooth_median": np.median(smooth[mask]),
-#             "sobel_mean": np.mean(sobel_edges[mask]),
-#             "sobel_std": np.std(sobel_edges[mask]),
-#             "sobel_median": np.median(sobel_edges[mask]),
-#             "medianf_mean": np.mean(median_filtered[mask]),
-#             "medianf_std": np.std(median_filtered[mask]),
-#             "medianf_median": np.median(median_filtered[mask])
-#         })
-#     extra_df = pd.DataFrame(extra_features)
-#     features_df = pd.concat([features_df, extra_df], axis=1)
-
-#     # --- Load model ---
-#     rf = joblib.load(model_path)
-
-#     # --- Match training feature order ---
-#     X_new = features_df[
-#         [
-#             'area', 'perimeter', 'eccentricity', 'solidity', 'extent',
-#             'major_axis_length', 'minor_axis_length', 'mean_intensity',
-#             'bbox-0', 'bbox-1', 'bbox-2', 'bbox-3',
-#             'centroid-0', 'centroid-1',
-#             'orientation',
-#             'smooth_mean', 'smooth_std', 'smooth_median',
-#             'sobel_mean', 'sobel_std', 'sobel_median',
-#             'medianf_mean', 'medianf_std', 'medianf_median'
-#         ]
-#     ]
-
-#     # --- Predict ---
-#     proba = rf.predict_proba(X_new)
-#     classes = rf.classes_
-#     initial_preds = rf.predict(X_new)
-
-#     if verbose:
-#         print(f"Model classes: {list(classes)}")
-
-#     # --- Confidence scores ---
-#     predicted_class_indices = [list(classes).index(pred) for pred in initial_preds]
-#     prediction_confidence = [proba[i][idx] for i, idx in enumerate(predicted_class_indices)]
-#     features_df["initial_prediction"] = initial_preds
-#     features_df["prediction_confidence"] = prediction_confidence
-
-#     # --- Map expected class names to model class names (case-insensitive) ---
-#     expected_classes = ["ABa", "ABp", "EMS", "P2"]
-#     class_map = {}
-    
-#     for expected in expected_classes:
-#         for model_class in classes:
-#             if expected.lower() == model_class.lower():
-#                 class_map[expected] = model_class
-#                 break
-        
-#         if expected not in class_map:
-#             raise ValueError(f"Model does not contain class '{expected}'. Available classes: {list(classes)}")
-
-#     # --- Confidence for each class ---
-#     for cname in expected_classes:
-#         model_class = class_map[cname]
-#         features_df[f"{cname}_conf"] = proba[:, list(classes).index(model_class)]
-
-#     # --- Fail-safe: ensure one label per class ---
-#     features_df["highest_confidence_label"] = "Unassigned"
-#     for cname in expected_classes:
-#         features_df.loc[features_df[f"{cname}_conf"].idxmax(), "highest_confidence_label"] = cname
-
-#     # --- Positional fail-safe using ellipse ---
-#     # Fit ellipse to entire embryo
-#     binary_image = (masks_cytosol > 0).astype(np.uint8)
-#     contours = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
-
-#     if contours and len(contours[0]) >= 5:
-#         cnt = max(contours, key=cv2.contourArea)
-#         ellipse = cv2.fitEllipse(cnt)
-#         (xc, yc), (d1, d2), angle = ellipse  # center, axes, rotation
-#         theta = np.deg2rad(angle)
-#         minor_axis_vec = np.array([-np.sin(theta), np.cos(theta)])  # along minor axis
-
-#         # Compute relative minor-axis positions for each cell
-#         rel_positions = []
-#         for idx, row in features_df.iterrows():
-#             centroid = np.array([row['centroid_x'], row['centroid_y']])
-#             vec_from_center = centroid - np.array([xc, yc])
-#             rel_pos_minor = np.dot(vec_from_center, minor_axis_vec) / d2  # normalized
-#             rel_positions.append(rel_pos_minor)
-#         features_df['rel_pos_minor'] = rel_positions
-
-#         # Assign ABa / P2 at ends
-#         left_cell = features_df.loc[features_df['rel_pos_minor'].idxmin()]
-#         right_cell = features_df.loc[features_df['rel_pos_minor'].idxmax()]
-#         if left_cell['area'] > right_cell['area']:
-#             features_df.loc[left_cell.name, 'highest_confidence_label'] = 'ABa'
-#             features_df.loc[right_cell.name, 'highest_confidence_label'] = 'P2'
-#         else:
-#             features_df.loc[left_cell.name, 'highest_confidence_label'] = 'P2'
-#             features_df.loc[right_cell.name, 'highest_confidence_label'] = 'ABa'
-
-#         # Middle cells: EMS = smaller, ABp = larger
-#         middle_cells = features_df.drop([left_cell.name, right_cell.name])
-#         ems_cell = middle_cells.loc[middle_cells['area'].idxmin()]
-#         abp_cell = middle_cells.loc[middle_cells['area'].idxmax()]
-#         features_df.loc[ems_cell.name, 'highest_confidence_label'] = 'EMS'
-#         features_df.loc[abp_cell.name, 'highest_confidence_label'] = 'ABp'
-
-#     # --- Plot results ---
-#     if verbose:
-#         mask_image = np.max(masks_cytosol, axis=0) if masks_cytosol.ndim == 3 else masks_cytosol
-#         plt.figure(figsize=(6, 6))
-#         plt.imshow(mask_image, cmap='nipy_spectral')
-#         plt.axis('off')
-
-#         for idx, row in features_df.iterrows():
-#             y, x = center_of_mass(mask_image == row['label'])
-#             plt.text(x, y, row['highest_confidence_label'], color='white',
-#                      fontsize=16, ha='center', va='center', weight='bold')
-
-#         plt.title("Predicted Labels on Cytosol Masks")
-
-#     # --- Save outputs ---
-#     features_df_output = os.path.join(output_directory, f'features_df_{image_name}.csv')
-#     features_df.to_csv(features_df_output, index=False)
-    
-#     if verbose:
-#         predicted_label_filename = os.path.join(output_directory, f'predicted_label_{image_name}.png')
-#         plt.savefig(predicted_label_filename, dpi=300, bbox_inches='tight')
-#         plt.show()
-
-#         print(features_df.tail())
-
-#         ## plot cell centroid position
-#         plt.figure(figsize=(6,6))
-#         for label, group in features_df.groupby('highest_confidence_label'):
-#             plt.scatter(group['centroid_x'], group['centroid_y'], 
-#                         s=group['area']/50, label=label)
-
-#         plt.gca().invert_yaxis()  # Match image coordinates
-#         plt.xlabel("X position")
-#         plt.ylabel("Y position")
-#         plt.legend()
-#         plt.title("Cell positions and sizes")
-        
-#         # Save the figure
-#         centroid_position_plot_filename = os.path.join(output_directory, f'centroid_position_plot_{image_name}.png')
-#         plt.savefig(centroid_position_plot_filename, dpi=300, bbox_inches='tight')
-#         plt.show()
-
-#         ### plot prediction confidence per cell
-#         # Reshape dataframe for plotting
-#         conf_cols = ['ABa_conf', 'ABp_conf', 'EMS_conf', 'P2_conf']
-#         conf_df = features_df.melt(id_vars='label', value_vars=conf_cols,
-#                                    var_name='class', value_name='confidence')
-
-#         # Strip "_conf" from class names
-#         conf_df['class'] = conf_df['class'].str.replace('_conf','')
-
-#         plt.figure(figsize=(8,4))
-#         sns.barplot(data=conf_df, x='label', y='confidence', hue='class')
-#         plt.ylabel("Classifier Confidence")
-#         plt.xlabel("Cell Mask Label")
-#         plt.title("Confidence Scores per Cell and Class")
-#         plt.legend(title="Class")
-        
-#         # Save the figure
-#         cell_confidence_plot_filename = os.path.join(output_directory, f'cell_confidence_plot_{image_name}.png')
-#         plt.savefig(cell_confidence_plot_filename, dpi=300, bbox_inches='tight')
-#         plt.show()
-
-#     return features_df
-
-
-
+# 4-cell classification using Random Forest
 
 def classify_4cell(masks_cytosol, bf, image_name, output_directory,
                    model_path="models/4-cell_classification_RFmodel.joblib",
@@ -2047,8 +1461,6 @@ def classify_4cell(masks_cytosol, bf, image_name, output_directory,
 # #### 3.4 Embryo Segementation
 
 # In[11]:
-
-
 
 
 
@@ -2613,6 +2025,78 @@ def line_scan(image, masks_cytosol, colormap, mRNA_name, image_name, output_dire
             print(f"Not enough points to fit an ellipse for {mRNA_name}.")
     else:
         print(f"No contours found in the mask for {mRNA_name}.")
+
+
+def create_local_heatmap(spots, max_proj, channel_name, masks_cytosol, grid_width, grid_height, 
+                         image_name, output_directory, vmin=0, vmax=None):
+    """
+    Create a grid-based heatmap visualization of RNA spots.
+    
+    Parameters:
+    -----------
+    spots : ndarray
+        3D coordinates of detected spots (z, y, x)
+    max_proj : ndarray
+        2D or 3D image array to project for visualization
+    channel_name : str
+        Name of the RNA channel (e.g., "set3_mRNA")
+    masks_cytosol : ndarray
+        Segmentation mask to determine grid dimensions
+    grid_width : int
+        Number of grid cells in x-direction (default: 80)
+    grid_height : int
+        Number of grid cells in y-direction (default: 80)
+    image_name : str
+        Name of the image for output filename
+    output_directory : str
+        Directory to save heatmap PNG
+    vmin : float, optional
+        Minimum value for color scale (default: 0)
+    vmax : float, optional
+        Maximum value for color scale; if None, uses max value in grid
+    
+    Returns:
+    --------
+    None (saves PNG and displays plot)
+    """
+    img_width, img_height = masks_cytosol.shape[1], masks_cytosol.shape[0]
+    cell_w = img_width / grid_width
+    cell_h = img_height / grid_height
+    grid = np.zeros((grid_height, grid_width), dtype=int)
+    
+    if spots is not None and len(spots) > 0:
+        for spot in spots:
+            z, y, x = spot[:3]
+            cell_x = int(x / cell_w)
+            cell_y = int(y / cell_h)
+            if 0 <= cell_x < grid_width and 0 <= cell_y < grid_height:
+                grid[cell_y, cell_x] += 1
+    
+    # Ensure max_proj is 2D
+    if max_proj.ndim > 2:
+        max_proj_2d = max_proj.max(axis=0)
+    else:
+        max_proj_2d = max_proj
+    
+    # Determine vmax if not provided
+    if vmax is None:
+        vmax = grid.max() if grid.max() > 0 else 1
+    
+    fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+    axs[0].imshow(max_proj_2d, cmap='gray')
+    axs[0].set_title(f"{channel_name} Max Projection")
+    axs[0].axis('off')
+    
+    im = axs[1].imshow(grid, cmap='hot', interpolation='nearest', vmin=vmin, vmax=vmax)
+    axs[1].set_title(f"{channel_name} Heatmap")
+    cbar = fig.colorbar(im, ax=axs[1], label="Spot Count")
+    axs[1].axis('off')
+    
+    plt.tight_layout()
+    heatmap_path = os.path.join(output_directory, f'{channel_name}_heatmap_{image_name}.png')
+    plt.savefig(heatmap_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Saved: {heatmap_path}")
 
 
 if __name__ == "__main__":
