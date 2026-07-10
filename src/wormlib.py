@@ -272,6 +272,28 @@ def load_pipeline_config(config_path=None, cli_input=None, cli_output=None):
     return normalize_pipeline_config(raw_config, base_dir=config_path.parent, cli_input=cli_input, cli_output=cli_output)
 
 
+def _organize_dv_files(dv_files):
+    """
+    For DeltaVision files, intelligently separate reference (brightfield) from color channel files.
+    
+    DeltaVision naming convention:
+    - Reference/brightfield: contains "_R3D_REF" (2D image)
+    - Color channels: contains "_R3D" but NOT "_R3D_REF" (4D image stack)
+    
+    Returns: list of filenames ordered as [reference_file, color_file, ...]
+    """
+    if not dv_files:
+        return []
+    
+    # Separate by naming pattern
+    ref_files = [f for f in dv_files if '_R3D_REF' in f]
+    color_files = [f for f in dv_files if '_R3D' in f and '_R3D_REF' not in f]
+    other_files = [f for f in dv_files if f not in ref_files and f not in color_files]
+    
+    # Return ordered list: reference first, then colors, then others
+    return ref_files + color_files + other_files
+
+
 def load_images(image_path, output_directory, channel_names, slice_to_plot=0, channel_indices=None):
     """
     Automatically detect image type (DV, ND2, or TIFF) and load images accordingly.
@@ -316,6 +338,8 @@ def load_images(image_path, output_directory, channel_names, slice_to_plot=0, ch
     
     if dv_files:
         image_type = 'dv'
+        # For DeltaVision, intelligently order files (ref first, then colors)
+        dv_files = _organize_dv_files(dv_files)
         print("Detected DeltaVision (.dv) images")
     elif nd2_files:
         image_type = 'nd2'
