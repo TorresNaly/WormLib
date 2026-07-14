@@ -1,4 +1,4 @@
-# WormLib <img src="docs/WormLib_logo.png" alt="WormLib Logo" width="225" align="right" />
+# WormLib <img src="docs/WormLib_logo.png" alt="WormLib Logo" width="350" align="right" />
 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/) [![BigFISH](https://img.shields.io/badge/smFISH-BigFISH-orange.svg)](https://github.com/fish-quant/big-fish) [![Cellpose](https://img.shields.io/badge/segmentation-Cellpose-green.svg)](https://github.com/MouseLand/cellpose)
