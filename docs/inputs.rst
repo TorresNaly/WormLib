@@ -1,4 +1,4 @@
-Input Formats and File Organization
+Input
 ====================================
 
 Supported Image Formats
@@ -6,47 +6,13 @@ Supported Image Formats
 
 WormLib supports three microscopy file formats:
 
-**DeltaVision (.dv)**
-- Applied Precision DeltaVision microscope format
+**DeltaVision (.dv), Nikon ND2 (.nd2), and TIFF (.tif, .tiff)**
 - Multi-channel volumetric images (Z-stacks)
 - Native support for 4D data (X, Y, Z, time) and channel extraction
-- Recommended for *C. elegans* embryo imaging
-
-**Nikon ND2 (.nd2)**
-- Nikon microscope format
-- Multi-channel support
-- Requires ``nd2`` package
-
-**TIFF (.tif, .tiff)**
-- Multi-page TIFF with channel stacking
-- Must have explicit channel indexing in configuration
 
 
-DeltaVision Naming Convention
-------------------------------
 
-DeltaVision files follow a specific naming pattern for reference vs. color images:
-
-**Reference image (brightfield):**
-
-.. code-block:: text
-
-    230713_Lp306_L4440_11_R3D_REF.dv
-
-Contains:
-- 2D brightfield transmission image for segmentation
-- Single channel per Z-slice
-
-**Color image (fluorescence):**
-
-.. code-block:: text
-
-    230713_Lp306_L4440_11_R3D.dv
-
-Contains:
-- 4D volumetric fluorescence data
-- 4 channels (Cy5, mCherry, FITC, DAPI) × Z-slices
-- Each channel is a separate index (0, 1, 2, 3)
+## DeltaVision files follow a specific naming pattern for reference vs. color images:
 
 **Critical Pattern:**
 
@@ -55,14 +21,30 @@ Contains:
     _R3D_REF  → brightfield reference (2D)
     _R3D      → color/fluorescence (4D multi-channel)
 
-Do NOT confuse these! The ``_R3D`` file must not include ``_REF`` in the name.
+
+**Reference image (brightfield):**
+
+Contains:
+- 2D brightfield transmission image for segmentation
+- Single channel per Z-slice
+
+**Color image (fluorescence):**
+
+Contains:
+- 4D (C,Z,Y,X) 
+- 4 channels (Cy5, mCherry, FITC, DAPI) × Z-slices
+- Each channel is a separate index (0, 1, 2, 3)
+
+Do NOT confuse these! The ``_R3D`` file must not include ``_D3D`` in the name and must be a different file from ``_REF``. 
 
 ---
 
 File Organization Best Practice
 --------------------------------
-
+Give your files informative names at the time of acquisition. Example: ``230713_Lp306_L4440_11_R3D_REF.dv`` = ``date_strain_condition_replicate/``.
 Organize your data in a clear folder structure:
+
+data>image_subdirectory>image_files
 
 .. code-block:: text
 
@@ -78,64 +60,32 @@ Organize your data in a clear folder structure:
         └── 230713_Lp306_L4440_13_R3D.dv
 
 **Benefits:**
-- Both reference and color files in same folder
-- WormLib auto-detects and loads both
-- Easy batch processing with wildcards
-- Output can mirror input structure
-
+- Both reference and color files in same folder allows WormLib to auto-detect and load both
+- Easy batch processing 
+- Image output subdirectory automatically created in the same folder as input images
 ---
 
-Channel Indexing
------------------
 
-**For DeltaVision files:**
-
-Standard *C. elegans* 4-cell embryo imaging:
-
-- Channel 0 — Cy5 (set3_mRNA, PSF: 1409/340/340 nm)
-- Channel 1 — mCherry (erm1_mRNA, PSF: 1283/310/310 nm)
-- Channel 2 — GFP (membrane/protein)
-- Channel 3 — DAPI (nuclei)
-
-Specify these in your YAML config:
-
-.. code-block:: yaml
-
-    channels:
-      nuclei:
-        index: 3          # DAPI
-      rna:
-        - name: set3_mRNA
-          fluorophore: Cy5
-          index: 0
-          spot_radius_nm: [1409, 340, 340]
-        - name: erm1_mRNA
-          fluorophore: mCherry
-          index: 1
-          spot_radius_nm: [1283, 310, 310]
-
----
 
 Loading Images in Code
 ------------------------
 
-**Automatic DeltaVision detection:**
+**Automatic file type detection. DeltaVision, Nikon and TIFF files supported :**
 
 .. code-block:: python
 
     import wormlib
-    from pathlib import Path
     
-    # Pass path to ANY file in the folder, or the color file
-    image_path = Path("data/230713_Lp306_L4440_11/230713_Lp306_L4440_11_R3D.dv")
+    # Path to image subdirectory
+    image_path = Path("data/230713_Lp306_L4440_11")
     
     result = wormlib.load_images(
         image_path=str(image_path),
         output_directory="output/",
         channel_names={
-            'Cy5': 'set3_mRNA',
-            'mCherry': 'erm1_mRNA',
-            'FITC': 'membrane',
+            'Cy5': 'set3_mRNA', # Describe what mRNA is in this channel
+            'mCherry': 'erm1_mRNA', # Describe what mRNA is in this channel
+            'FITC': 'membrane', # Describe what marker is in this channel
             'DAPI': 'DAPI',
             'brightfield': 'brightfield'
         },
@@ -148,37 +98,55 @@ Loading Images in Code
         }
     )
 
-WormLib automatically:
-1. Detects ``.dv`` extension
-2. Finds both ``_R3D_REF`` and ``_R3D`` files in the same folder
-3. Loads brightfield from the reference file
-4. Loads channels from the color file
-5. Returns organized image data
+WormLib automatically detects ``.dv`` extension and finds both ``_R3D_REF`` and ``_R3D`` files in the same folder. It can load brightfield from the reference file (R3D_REF.dv) and channels from the color file (R3D.dv) and returns organized image data.
 
 **Result structure:**
 
-.. code-block:: python
+.. list-table:: Image Data Dictionary
+   :widths: 25 20 55
+   :header-rows: 1
 
-    {
-        'image_type': 'DeltaVision',
-        'image_name': '230713_Lp306_L4440_11',
-        'bf': array(...),              # brightfield (1024, 1024)
-        'image_Cy5': array(...),       # Channel 0 max projection
-        'image_mCherry': array(...),   # Channel 1 max projection
-        'image_FITC': array(...),      # Channel 2 max projection
-        'image_nuclei': array(...),    # Channel 3 max projection
-        'Cy5_array': array(...),       # Channel 0 full 3D (Z, Y, X)
-        'mCherry_array': array(...),   # Channel 1 full 3D
-        'FITC_array': array(...),      # Channel 2 full 3D
-        'nuclei_array': array(...),    # Channel 3 full 3D
-        'grid_width': 80,
-        'grid_height': 80
-    }
+   * - Key
+     - Value/Type
+     - Description
+   * - image_type
+     - str
+     - Image format type (e.g., 'DeltaVision')
+   * - image_name
+     - str
+     - Image filename without extension (e.g., '230713_Lp306_L4440_11')
+   * - bf
+     - numpy array
+     - Brightfield (transmission) 2D image (1024, 1024)
+   * - image_Cy5
+     - numpy array
+     - Channel 0 max projection (Cy5 fluorophore)
+   * - image_mCherry
+     - numpy array
+     - Channel 1 max projection (mCherry fluorophore)
+   * - image_FITC
+     - numpy array
+     - Channel 2 max projection (FITC/GFP fluorophore)
+   * - image_nuclei
+     - numpy array
+     - Channel 3 max projection (DAPI/nuclei stain)
+   * - Cy5_array
+     - numpy array
+     - Channel 0 full 3D volume (Z, Y, X)
+   * - mCherry_array
+     - numpy array
+     - Channel 1 full 3D volume (Z, Y, X)
+   * - FITC_array
+     - numpy array
+     - Channel 2 full 3D volume (Z, Y, X)
+   * - nuclei_array
+     - numpy array
+     - Channel 3 full 3D volume (Z, Y, X)
+   * - grid_width
+     - int
+     - Grid width in pixels (80)
+   * - grid_height
+     - int
+     - Grid height in pixels (80)
 
 ---
-
-Next Steps
-----------
-
-- Configure your analysis in :doc:`settings`
-- Run analysis and check :doc:`outputs`

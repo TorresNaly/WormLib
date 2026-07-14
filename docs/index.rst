@@ -9,11 +9,12 @@ WormLib documentation
 WormLib is a modular open-source image analysis library for quantifying microscopy images of Caenorhabditis elegans embryos. It provides an end-to-end pipeline from image loading, embryo segmentation, cell identity prediction, single-molecule FISH (smFISH) spot detection, and spatial mRNA analysis.
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+   :maxdepth: 3
+   :caption: BASICS:
 
    installation
-   settings
    inputs
+   settings
    outputs
    models
+   examples
