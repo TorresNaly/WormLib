@@ -13,7 +13,7 @@ WormLib is a modular open-source image analysis library for quantifying microsco
    :caption: Contents:
 
    installation
-   settings
    inputs
+   settings
    outputs
    models
