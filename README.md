@@ -86,6 +86,9 @@ If you see an error indicating that a module compiled with NumPy `< 2.0` cannot
 run with NumPy `≥ 2.0`, or `_ARRAY_API not found`, the active environment is not
 using the pinned WormLib environment. Recreate it from the YAML file above.
 
+## Run WormLib on a High Performance Cluster
+
+
 
 ---
 
