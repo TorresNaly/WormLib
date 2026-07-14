@@ -2103,7 +2103,7 @@ def save_spot_quantification(spot_counts_dict, image_name, output_directory,
 
 
 def create_local_heatmap(spots, max_proj, channel_name, masks_cytosol, grid_width, grid_height, 
-                         image_name, output_directory, vmin=0, vmax=None):
+                         image_name, output_directory, vmin=0, vmax=None, normalize_scale=False):
     """
     Create a grid-based heatmap visualization of RNA spots.
     
@@ -2129,6 +2129,8 @@ def create_local_heatmap(spots, max_proj, channel_name, masks_cytosol, grid_widt
         Minimum value for color scale (default: 0)
     vmax : float, optional
         Maximum value for color scale; if None, uses max value in grid
+    normalize_scale : bool, optional
+        If True, scale the heatmap values to the range 0-1 before plotting.
     
     Returns:
     --------
@@ -2153,16 +2155,25 @@ def create_local_heatmap(spots, max_proj, channel_name, masks_cytosol, grid_widt
     else:
         max_proj_2d = max_proj
     
-    # Determine vmax if not provided
-    if vmax is None:
-        vmax = grid.max() if grid.max() > 0 else 1
+    # Optionally normalize the heatmap scale so different channels are comparable
+    if normalize_scale:
+        grid_plot = grid.astype(float)
+        max_value = grid_plot.max()
+        if max_value > 0:
+            grid_plot = grid_plot / max_value
+        if vmax is None:
+            vmax = 1.0
+    else:
+        grid_plot = grid
+        if vmax is None:
+            vmax = grid.max() if grid.max() > 0 else 1
     
     fig, axs = plt.subplots(1, 2, figsize=(12, 5))
     axs[0].imshow(max_proj_2d, cmap='gray')
     axs[0].set_title(f"{channel_name} Max Projection")
     axs[0].axis('off')
     
-    im = axs[1].imshow(grid, cmap='hot', interpolation='nearest', vmin=vmin, vmax=vmax)
+    im = axs[1].imshow(grid_plot, cmap='hot', interpolation='nearest', vmin=vmin, vmax=vmax)
     axs[1].set_title(f"{channel_name} Heatmap")
     cbar = fig.colorbar(im, ax=axs[1], label="Spot Count")
     axs[1].axis('off')
