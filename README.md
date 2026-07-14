@@ -20,8 +20,19 @@ If you use WormLib in your research, please cite:
 ---
 
 ## Installation
+If you already have an older or broken `wormlib` environment, remove it first:
+
+```bash
+conda deactivate
+conda env remove -n wormlib
+conda env create -f installation/wormlib.yml
+conda activate wormlib
+```
+
 
 ### Option #1: Quick Install With Conda
+This installs the core scientific stack through conda and the remaining
+WormLib dependencies through pip. 
 
 ```bash
 # Clone the repository
@@ -33,8 +44,6 @@ conda env create -f installation/wormlib.yml
 conda activate wormlib
 ```
 
-This installs the core scientific stack through conda and the remaining
-WormLib dependencies through pip. 
 
 #### Dependencies
 
@@ -77,16 +86,6 @@ If you see an error indicating that a module compiled with NumPy `< 2.0` cannot
 run with NumPy `≥ 2.0`, or `_ARRAY_API not found`, the active environment is not
 using the pinned WormLib environment. Recreate it from the YAML file above.
 
----
-
-If you already have an older or broken `wormlib` environment, remove it first:
-
-```bash
-conda deactivate
-conda env remove -n wormlib
-conda env create -f installation/wormlib.yml
-conda activate wormlib
-```
 
 ---
 
