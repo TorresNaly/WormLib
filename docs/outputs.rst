@@ -4,42 +4,63 @@ Output Files and Results Structure
 WormLib generates organized output organized by image name. Each analysis produces visualization PNGs, quantification CSVs, and binary segmentation masks. Outputs are saved flat (no subdirectories) in the image-specific output directory.
 
 ---
-
-Output Directory Structure
+Image Data Dictionary
 ----------------------------
 
+.. list-table:: Image Data Dictionary
+   :widths: 25 20 55
+   :header-rows: 1
 
-List of output automatically saved in image subdirectory after single cell spot detection analysis on ``230713_Lp306_L4440_11``:
+   * - Key
+     - Value/Type
+     - Description
+   * - image_type
+     - str
+     - Image format type (e.g., 'DeltaVision')
+   * - image_name
+     - str
+     - Image filename without extension (e.g., '230713_Lp306_L4440_11')
+   * - bf
+     - numpy array
+     - Brightfield (transmission) 2D image (1024, 1024)
+   * - image_Cy5
+     - numpy array
+     - Channel 0 max projection (Cy5 fluorophore)
+   * - image_mCherry
+     - numpy array
+     - Channel 1 max projection (mCherry fluorophore)
+   * - image_FITC
+     - numpy array
+     - Channel 2 max projection (FITC/GFP fluorophore)
+   * - image_nuclei
+     - numpy array
+     - Channel 3 max projection (DAPI/nuclei stain)
+   * - Cy5_array
+     - numpy array
+     - Channel 0 full 3D volume (Z, Y, X)
+   * - mCherry_array
+     - numpy array
+     - Channel 1 full 3D volume (Z, Y, X)
+   * - FITC_array
+     - numpy array
+     - Channel 2 full 3D volume (Z, Y, X)
+   * - nuclei_array
+     - numpy array
+     - Channel 3 full 3D volume (Z, Y, X)
+   * - grid_width
+     - int
+     - Grid width in pixels (80)
+   * - grid_height
+     - int
+     - Grid height in pixels (80)
 
-.. code-block:: text
-
-    output/230713_Lp306_L4440_11/
-    ├── channels_230713_Lp306_L4440_11.png
-    ├── set3_mRNA_detection_230713_Lp306_L4440_11.png
-    ├── set3_mRNA_threshold_230713_Lp306_L4440_11.png
-    ├── set3_mRNA_heatmap_230713_Lp306_L4440_11.png
-    ├── set3_mRNA_line_scan_230713_Lp306_L4440_11.png
-    ├── set3_mRNA_line_ROI_230713_Lp306_L4440_11.png
-    ├── set3_mRNA_line_density_data_230713_Lp306_L4440_11.csv
-    ├── set3_mRNA_line_scan_data_230713_Lp306_L4440_11.csv
-    ├── erm1_mRNA_detection_230713_Lp306_L4440_11.png
-    ├── erm1_mRNA_threshold_230713_Lp306_L4440_11.png
-    ├── erm1_mRNA_heatmap_230713_Lp306_L4440_11.png
-    ├── erm1_mRNA_line_scan_230713_Lp306_L4440_11.png
-    ├── erm1_mRNA_line_ROI_230713_Lp306_L4440_11.png
-    ├── erm1_mRNA_line_density_data_230713_Lp306_L4440_11.csv
-    ├── erm1_mRNA_line_scan_data_230713_Lp306_L4440_11.csv
-    ├── masks_cytosol.tif
-    ├── per_region_mRNA_counts_230713_Lp306_L4440_11.csv
-    ├── total_mRNA_counts_230713_Lp306_L4440_11.csv
-    ├── features_df_230713_Lp306_L4440_11.csv
-    ├── centroid_position_plot_230713_Lp306_L4440_11.png
-    ├── cell_confidence_plot_230713_Lp306_L4440_11.png
-    └── predicted_label_230713_Lp306_L4440_11.png
+---
 
 
 Output Files Reference
 -------------------------------
+All output is automatically saved in the image subdirectory after single cell spot detection analysis on ``230713_Lp306_L4440_11``:
+
 
 .. list-table::
    :header-rows: 1
@@ -119,7 +140,7 @@ CSV Data Format Examples
 .. code-block:: text
 
     Image ID,set3_mRNA total molecules,erm1_mRNA total molecules
-    230713_Lp306_L4440_11,547,302
+    230713_Lp306_L4440_11,989,2848
 
 
 **per_region_mRNA_counts_{image_name}.csv** — Per-region analysis data:
@@ -127,9 +148,9 @@ CSV Data Format Examples
 .. code-block:: text
 
     Image ID,region_id,set3_mRNA,erm1_mRNA,label,confidence
-    230713_Lp306_L4440_11,1,125,89,AB,0.987
-    230713_Lp306_L4440_11,2,98,72,P1,0.954
-    230713_Lp306_L4440_11,3,156,104,ABa,0.923
+    230713_Lp306_L4440_11,1,125,89,ABa,0.987
+    230713_Lp306_L4440_11,2,98,72,P2,0.954
+    230713_Lp306_L4440_11,3,156,104,ABp,0.923
     230713_Lp306_L4440_11,4,168,37,EMS,0.891
 
 
@@ -137,9 +158,11 @@ CSV Data Format Examples
 
 .. code-block:: text
 
-    region_id,centroid_x,centroid_y,area,eccentricity,...
-    1,512.5,256.3,18500,0.45,...
-    2,520.1,389.2,22100,0.52,...
+    label,area,centroid_y,centroid_x,eccentricity,...
+    1,19956.0,502.04,276.28,0.769,...
+    2,31203.0,559.68,449.80,0.386,...
+    3,18288.0,557.60,145.62,0.683,...
+    4,20427.0,622.99,283.62,0.798,...
 
 
 
@@ -149,68 +172,31 @@ Interpreting Results
 ---------------------
 
 **Robust spot detection**
-
-- Red/blue dots in spot detection PNG match obvious fluorescent puncta
-- Threshold PNG shows appropriate thresholding applied
+- Threshold PNG shows thresholding applied. Verify here if appropriate.
 - Not too noisy (false positives from background)
 - Not too conservative (missing real signal)
-- Adjust ``spot_radius_nm`` in config if results look off
+- Adjust ``spot_radius_nm`` in your input configutation if results look off
+Example PSF values for a DeltaVision microscope:
+spot_radius_ch0 = (1409, 340, 340)  # PSF for channel 0 (Cy5)
+spot_radius_ch1 = (1283, 310, 310)  # PSF for channel 1 (mCherry)
 
 **Meaningful heatmaps**
-
 - Grid heatmap shows clear spatial patterns (not uniform)
 - High-abundance regions correspond to visible spots in image
 - Compare between channels to identify differential localization
 
 **Cell classification accuracy**
-
-- Check ``confidence`` column in per_region CSV
-- Confidence > 0.9 is generally reliable
+- We encourage all users to inspect the ``predicted_label`` overlay and ``cell_confidence_plot`` to verify that cell identities are assigned correctly. 
+- - Check ``confidence`` column in per_region CSV. Confidence > 0.9 is generally reliable.
 - Lower confidence suggests ambiguous cell identity or segmentation artifact
-- Use ``cell_confidence_plot`` to visualize prediction reliability across all cells
+- If the confidence is low, consider retraining the classifier with your own representative training data.
+- Classification accuracy is directly impacted by the quality of segmentation.
 
 **Segmentation quality**
-
 - Check ``masks_cytosol.tif`` to verify cell boundaries
 - Inspect ``centroid_position_plot`` to confirm region centroids
-- Check ``predicted_label`` overlay to see cell identity assignment accuracy
+- If segmentation is poor, consider adjusting ``segmentation_threshold`` or ``min_region_size`` in your input configuration.
+- Consider improving the ce-embryo single cell segmentation model by re-training on your own images.
 
 ---
-
-Troubleshooting Output Issues
-------------------------------
-
-**No output files generated**
-
-- Check pipeline flags in config (e.g., ``spot_detection: true``)
-- Verify output_directory exists and is writable
-- Check console output for error messages
-
-**Blank or noisy visualizations**
-
-- Verify channel_indices are correct
-- Check image data (plot in Jupyter to inspect)
-- Confirm PSF values are appropriate for your microscope
-- Inspect ``*_threshold_{image_name}.png`` to check if threshold is too aggressive/conservative
-
-**CSV files missing**
-
-- Spot detection must run before quantification CSVs are generated
-- Classifier must be enabled for ``label`` and ``confidence`` columns in per_region CSV
-- Review pipeline flags in config
-
-**Line scan files missing**
-
-- Ensure ``line_scan_enabled`` is set to ``true`` in config
-- Check that line ROI was properly defined for your embryo orientation
-
----
-
-Next Steps
-----------
-
-- See :doc:`models` to understand pre-trained classifiers
-- See :doc:`settings` to configure your analysis
-
-
 
