@@ -1,158 +1,167 @@
-Output Files and Results Structure
+Outputs
 ===================================
 
-WormLib generates organized output organized by image name. Each analysis produces visualization PNGs, quantification CSVs, and a compiled PDF report.
+
+Image Data Dictionary
+----------------------------
+
+.. list-table:: Image Data Dictionary
+   :widths: 25 20 55
+   :header-rows: 1
+
+   * - Key
+     - Value/Type
+     - Description
+   * - image_type
+     - str
+     - Image format type (e.g., 'DeltaVision')
+   * - image_name
+     - str
+     - Image filename without extension (e.g., '230713_Lp306_L4440_11')
+   * - bf
+     - numpy array
+     - Brightfield (transmission) 2D image (1024, 1024)
+   * - image_Cy5
+     - numpy array
+     - Channel 0 max projection (Cy5 fluorophore)
+   * - image_mCherry
+     - numpy array
+     - Channel 1 max projection (mCherry fluorophore)
+   * - image_FITC
+     - numpy array
+     - Channel 2 max projection (FITC/GFP fluorophore)
+   * - image_nuclei
+     - numpy array
+     - Channel 3 max projection (DAPI/nuclei stain)
+   * - Cy5_array
+     - numpy array
+     - Channel 0 full 3D volume (Z, Y, X)
+   * - mCherry_array
+     - numpy array
+     - Channel 1 full 3D volume (Z, Y, X)
+   * - FITC_array
+     - numpy array
+     - Channel 2 full 3D volume (Z, Y, X)
+   * - nuclei_array
+     - numpy array
+     - Channel 3 full 3D volume (Z, Y, X)
+   * - grid_width
+     - int
+     - Grid width in pixels (80)
+   * - grid_height
+     - int
+     - Grid height in pixels (80)
 
 ---
 
-Output Directory Structure
-----------------------------
 
-After running analysis on ``230713_Lp306_L4440_11``:
-
-.. code-block:: text
-
-    output/230713_Lp306_L4440_11/
-    ├── Segmentation_Masks/
-    │   ├── cytosol_mask.png
-    │   ├── nuclei_mask.png
-    │   └── nuclei_outlines.png
-    ├── Spot_Detection/
-    │   ├── set3_mRNA_detection_230713_Lp306_L4440_11.png
-    │   └── erm1_mRNA_detection_230713_Lp306_L4440_11.png
-    ├── Heatmaps/
-    │   ├── set3_mRNA_heatmap_230713_Lp306_L4440_11.png
-    │   └── erm1_mRNA_heatmap_230713_Lp306_L4440_11.png
-    ├── Line_Scans/
-    │   ├── set3_mRNA_line_scan_230713_Lp306_L4440_11.png
-    │   └── erm1_mRNA_line_scan_230713_Lp306_L4440_11.png
-    ├── per_cell_mRNA_counts_230713_Lp306_L4440_11.csv
-    ├── total_mRNA_counts_230713_Lp306_L4440_11.csv
-    ├── Classification_Report_230713_Lp306_L4440_11.csv
-    └── 230713_Lp306_L4440_11_report.pdf
+Output Files Reference
+-------------------------------
+All output is automatically saved in the image subdirectory after single cell spot detection analysis on ``230713_Lp306_L4440_11``:
 
 
-Visualization Outputs (PNG)
-----------------------------
+.. list-table::
+   :header-rows: 1
+   :widths: 30 15 40
 
-**Segmentation Masks**
+   * - Generic Pattern
+     - Type
+     - Description
+   * - ``channels_{image_name}.png``
+     - PNG
+     - Raw channel images displayed side-by-side for visual inspection
+   * - ``{channel_name}_detection_{image_name}.png``
+     - PNG
+     - Detected mRNA spots marked as red/blue points on max projection. One file per RNA channel.
+   * - ``{channel_name}_threshold_{image_name}.png``
+     - PNG
+     - Visualization of threshold applied during spot detection. One file per RNA channel.
+   * - ``{channel_name}_heatmap_{image_name}.png``
+     - PNG
+     - Side-by-side heatmap figure: (left) max projection with spot density overlay; (right) 80×80 grid showing spot abundance per region. One file per RNA channel.
+   * - ``{channel_name}_line_scan_{image_name}.png``
+     - PNG
+     - 1D intensity profile along embryo anterior-posterior axis. One file per RNA channel.
+   * - ``{channel_name}_line_ROI_{image_name}.png``
+     - PNG
+     - Visual representation of the line scan region of interest on the embryo. One file per RNA channel.
+   * - ``masks_cytosol.tif``
+     - TIF
+     - Binary segmentation mask of all detected cells/regions (multi-channel format)
+   * - ``centroid_position_plot_{image_name}.png``
+     - PNG
+     - Visualization of cell/region centroids overlaid on embryo image
+   * - ``cell_confidence_plot_{image_name}.png``
+     - PNG
+     - Plot showing classification confidence scores for each predicted cell identity
+   * - ``predicted_label_{image_name}.png``
+     - PNG
+     - Overlay of predicted cell identity labels on segmented embryo image
+   * - ``total_mRNA_counts_{image_name}.csv``
+     - CSV
+     - Wide format summary: total mRNA spot counts per channel for the entire image (useful for bulk statistics)
+   * - ``per_region_mRNA_counts_{image_name}.csv``
+     - CSV
+     - Long format: spot counts per region, including region_id, channel counts, predicted label, and confidence scores (for statistical analysis and per-cell quantification)
+   * - ``features_df_{image_name}.csv``
+     - CSV
+     - Classification features used by Random Forest: centroid position (X, Y), cell area, eccentricity, and other morphological properties
+   * - ``{channel_name}_line_density_data_{image_name}.csv``
+     - CSV
+     - Quantitative spot density values sampled along the line ROI. One file per RNA channel.
+   * - ``{channel_name}_line_scan_data_{image_name}.csv``
+     - CSV
+     - Raw intensity values sampled along the line scan profile. One file per RNA channel.
 
-- ``cytosol_mask.png`` — Individual cell outlines (one per segmented cell)
-- ``nuclei_mask.png`` — Nucleus boundaries
-- ``nuclei_outlines.png`` — Nuclear outlines overlaid on brightfield
 
-Used to verify segmentation quality before analysis.
+CSV Data Format Examples
+--------------------------
 
-**Spot Detection**
-
-- ``{channel_name}_detection_{image_name}.png`` — Red/blue points marking detected spots
-
-Shows spot locations in max projection view. One file per RNA channel.
-
-**Heatmaps**
-
-- ``{channel_name}_heatmap_{image_name}.png`` — Side-by-side figure
-
-Left panel: Max projection image with spot density overlay
-Right panel: 80×80 grid heatmap showing spot abundance per cell
-
-Quantifies spatial distribution of mRNA across the embryo.
-
-**Line Scans**
-
-- ``{channel_name}_line_scan_{image_name}.png`` — 1D intensity profile along embryo axis
-
-Shows RNA intensity variation along anterior-posterior axis with embryo cell labels (if classifier enabled).
-
-
-Quantification Outputs (CSV)
------------------------------
-
-**Wide Format: ``total_mRNA_counts_{image_name}.csv``**
-
-Summary counts per image:
+**total_mRNA_counts_{image_name}.csv** — Quick summary of total counts:
 
 .. code-block:: text
 
     Image ID,set3_mRNA total molecules,erm1_mRNA total molecules
-    230713_Lp306_L4440_11,547,302
+    230713_Lp306_L4440_11,989,2848
 
-Useful for quick statistics across many images.
 
-**Long Format: ``per_cell_mRNA_counts_{image_name}.csv``**
-
-Per-cell spot counts:
+**per_region_mRNA_counts_{image_name}.csv** — Per-region analysis data:
 
 .. code-block:: text
 
     Image ID,region_id,set3_mRNA,erm1_mRNA,label,confidence
-    230713_Lp306_L4440_11,1,125,89,AB,0.987
-    230713_Lp306_L4440_11,2,98,72,P1,0.954
-    230713_Lp306_L4440_11,3,156,104,ABa,0.923
+    230713_Lp306_L4440_11,1,125,89,ABa,0.987
+    230713_Lp306_L4440_11,2,98,72,P2,0.954
+    230713_Lp306_L4440_11,3,156,104,ABp,0.923
     230713_Lp306_L4440_11,4,168,37,EMS,0.891
 
-Columns:
 
-- ``Image ID`` — Image filename
-- ``region_id`` — Cell number (1, 2, 3, ...)
-- ``{channel_name}`` — Spot count per channel
-- ``label`` — Predicted cell identity (if classifier enabled)
-- ``confidence`` — Prediction confidence (0.0–1.0)
-
-Use this for statistical analysis, correlation tests, etc.
-
-**Classification Report: ``Classification_Report_{image_name}.csv``**
-
-Cell identity predictions with feature values:
+**features_df_{image_name}.csv** — Morphological features for classification:
 
 .. code-block:: text
 
-    Cell_ID,label,prediction_confidence,centroid_x,centroid_y,area,eccentricity
-    1,AB,0.987,512.5,256.3,18500,0.45
-    2,P1,0.954,520.1,389.2,22100,0.52
-    ...
-
-Features used by the Random Forest classifier:
-- Centroid position (X, Y)
-- Cell area (pixels²)
-- Eccentricity (elongation)
-- Other morphological features
+    label,area,centroid_y,centroid_x,eccentricity,...
+    1,19956.0,502.04,276.28,0.769,...
+    2,31203.0,559.68,449.80,0.386,...
+    3,18288.0,557.60,145.62,0.683,...
+    4,20427.0,622.99,283.62,0.798,...
 
 
-PDF Report
-----------
-
-**``{image_name}_report.pdf``**
-
-Compiled analysis report containing:
-
-- Segmentation visualization (masks overlay)
-- Spot detection for each channel
-- Heatmaps (left: image, right: grid)
-- Line scan plots
-- Summary statistics (total spots, per-cell distributions)
-- Classification results table (if enabled)
-- Processing parameters (voxel size, PSF, segmentation settings)
-
-Automatically generated at the end of analysis. Suitable for sharing with collaborators.
 
 ---
 
 Interpreting Results
 ---------------------
 
-**High-quality segmentation**
-
-- Clear cell boundaries in segmentation mask
-- No merged cells or fragments
-- Expected count: 2-cell or 4-cell embryos only
-
 **Robust spot detection**
 
-- Red/blue dots in spot detection PNG match obvious fluorescent puncta
+- Threshold PNG shows thresholding applied. Verify here if appropriate.
 - Not too noisy (false positives from background)
 - Not too conservative (missing real signal)
-- Adjust ``spot_radius_nm`` in config if results look off
+- Adjust ``spot_radius_nm`` in your input configutation if results look off
+Example PSF values for a DeltaVision microscope:
+spot_radius_ch0 = (1409, 340, 340)  # PSF for channel 0 (Cy5)
+spot_radius_ch1 = (1283, 310, 310)  # PSF for channel 1 (mCherry)
 
 **Meaningful heatmaps**
 
@@ -162,37 +171,18 @@ Interpreting Results
 
 **Cell classification accuracy**
 
-- Check ``confidence`` column in per_cell CSV
-- Confidence > 0.9 is generally reliable
+- We encourage all users to inspect the ``predicted_label`` overlay and ``cell_confidence_plot`` to verify that cell identities are assigned correctly. 
+- - Check ``confidence`` column in per_region CSV. Confidence > 0.9 is generally reliable.
 - Lower confidence suggests ambiguous cell identity or segmentation artifact
+- If the confidence is low, consider retraining the classifier with your own representative training data.
+- Classification accuracy is directly impacted by the quality of segmentation.
+
+**Segmentation quality**
+
+- Check ``masks_cytosol.tif`` to verify cell boundaries
+- Inspect ``centroid_position_plot`` to confirm region centroids
+- If segmentation is poor, consider adjusting ``segmentation_threshold`` or ``min_region_size`` in your input configuration.
+- Consider improving the ce-embryo single cell segmentation model by re-training on your own images.
 
 ---
 
-Troubleshooting Output Issues
-------------------------------
-
-**No output files generated**
-
-- Check pipeline flags in config (e.g., ``spot_detection: true``)
-- Verify output_directory exists and is writable
-- Check console output for error messages
-
-**Blank or noisy visualizations**
-
-- Verify channel_indices are correct
-- Check image data (plot in Jupyter to inspect)
-- Confirm PSF values are appropriate for your microscope
-
-**CSV files missing**
-
-- Spot detection must run before quantification CSVs are generated
-- Classifier must be enabled for ``label`` and ``confidence`` columns
-- Review pipeline flags
-
----
-
-Next Steps
-----------
-
-- See :doc:`models` to understand pre-trained classifiers
-- See :doc:`settings` to configure your analysis
