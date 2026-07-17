@@ -12,10 +12,18 @@ File formats supported by WormLib:
 
 
 
-DeltaVision files
-------------------------
+.. rubric:: DeltaVision files
 
 Use one folder per acquisition. A typical DeltaVision folder looks like:
+
+**File Naming Convention:**
+
+.. code-block:: text
+
+    embryo_001_R3D_REF.dv    # Reference image (brightfield)
+    embryo_001_R3D.dv        # Color image (fluorescence)
+
+WormLib automatically detects the ``.dv`` extension and finds both ``_R3D_REF`` and ``_R3D`` files in the same folder, loading brightfield from the reference file and channels from the color file.
 
 .. code-block:: text
 
@@ -26,9 +34,14 @@ Use one folder per acquisition. A typical DeltaVision folder looks like:
             └── embryo_001_R3D_REF.dv   # 2D brightfield/reference image
 
 
-WormLib assigns channels by zero-based order. These defaults match the bundled example:
+WormLib assigns channels by zero-based order. These defaults match the example notebook:
 
-.. list-table:: DeltaVision Channel Assignment
+**Color image** (``_R3D``)
+  - Fluorescence channels (4D multi-channel)
+  - 4D (C, Z, Y, X): C = channel, Z = z-slice, Y = height, X = width
+  - Used for smFISH spot detection and spatial mRNA analysis
+  
+.. list-table:: R3D Channel Assignment
    :widths: 20 20 30
    :header-rows: 1
 
@@ -48,37 +61,36 @@ WormLib assigns channels by zero-based order. These defaults match the bundled e
      - ``DAPI``
      - Nuclei
 
-If your channel order is different, set the `index` field for each channel
-in your input configuration.
-
-
-**File Naming Convention:**
-
-.. code-block:: text
-
-    embryo_001_R3D_REF.dv    # Reference image (brightfield)
-    embryo_001_R3D.dv        # Color image (fluorescence)
 
 **Reference image** (``_R3D_REF``)
   - Brightfield reference (2D)
   - Single channel 2D brightfield
   - Used for embryo segmentation and cell identity prediction
 
-**Color image** (``_R3D``)
-  - Fluorescence channels (4D multi-channel)
-  - 4D (C, Z, Y, X): C = channel, Z = z-slice, Y = height, X = width
-  - Used for smFISH spot detection and spatial mRNA analysis
+.. list-table:: R3D_REF Channel Assignment
+   :widths: 20 20 30
+   :header-rows: 1
+
+   * - Channel Index
+     - WormLib Name
+     - Typical Use
+   * - 0
+     - ``brightfield``
+     - Brightfield/reference
+   
+
+
+If your channel order is different, set the `index` field for each channel
+in your input configuration.
+
 
 .. important::
 
    Do NOT confuse these files! The ``_R3D`` file must NOT include ``_D3D`` in the name and must be a different file from ``_R3D_REF``.
 
-WormLib automatically detects the ``.dv`` extension and finds both ``_R3D_REF`` and ``_R3D`` files in the same folder, loading brightfield from the reference file and channels from the color file.
-
 ---
 
-Nikon ND2 Files
-------------------------
+.. rubric:: Nikon ND2 Files
 
 **File Naming Convention:**
 
@@ -118,8 +130,7 @@ If a channel is missing, set its `name` to `None` in the input configuration in 
 
 ---
 
-TIFF Files
-------------------------
+.. rubric:: TIFF Files
 
 **File Naming Convention:**
 
