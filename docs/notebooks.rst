@@ -1,9 +1,6 @@
 Example Notebooks
 =================
 
-WormLib includes example notebook workflows for local runs and batch execution.
+WormLib includes example notebook workflows for local runs and batch execution here: ``examples/``:
 
-.. toctree::
-   :maxdepth: 1
-
-   run_batch
+- ``1 - Single-cell spot detection.ipynb`` - Two RNA channels with cell classification
