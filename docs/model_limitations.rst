@@ -1,9 +1,5 @@
-Cell Classification Models (Random Forest)
-==================
-
-
 WormLib Models Limitations and Best Practices
--------------------------------------
+==================
 
 **Known limitations:**
 
