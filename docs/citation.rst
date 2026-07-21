@@ -14,7 +14,7 @@ If you use the Pre-trained Cellpose segmentation models, please also cite:
 
 
 If you use the BigFISH spot detection functions, please also cite:
-**Arthur Imbert., et al.** FISH-quant v2: a scalable and modular analysis tool for smFISH image analysis. bioRxiv (2021) https://doi.org/10.1101/2021.07.20.453024
+**Arthur Imbert., et al.** (2021). FISH-quant v2: a scalable and modular analysis tool for smFISH image analysis. https://doi.org/10.1101/2021.07.20.453024
 
 
 ---
